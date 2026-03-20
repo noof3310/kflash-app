@@ -21,7 +21,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import Papa from 'papaparse';
 import { SQLiteProvider, useSQLiteContext } from './src/lib/nativeSqliteProvider';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { migrateDbIfNeeded } from './src/lib/db';
 import {
   buildAdaptiveQuizItem,
@@ -58,18 +58,22 @@ const AnimatedScrollView = Animated.createAnimatedComponent(ScrollView);
 export default function App() {
   if (Platform.OS === 'web') {
     return (
-      <AppErrorBoundary>
-        <WebAppShell />
-      </AppErrorBoundary>
+      <SafeAreaProvider>
+        <AppErrorBoundary>
+          <WebAppShell />
+        </AppErrorBoundary>
+      </SafeAreaProvider>
     );
   }
 
   return (
-    <SQLiteProvider databaseName={DB_NAME} onInit={migrateDbIfNeeded}>
-      <AppErrorBoundary>
-        <NativeAppShell />
-      </AppErrorBoundary>
-    </SQLiteProvider>
+    <SafeAreaProvider>
+      <SQLiteProvider databaseName={DB_NAME} onInit={migrateDbIfNeeded}>
+        <AppErrorBoundary>
+          <NativeAppShell />
+        </AppErrorBoundary>
+      </SQLiteProvider>
+    </SafeAreaProvider>
   );
 }
 
