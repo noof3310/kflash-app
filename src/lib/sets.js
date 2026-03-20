@@ -119,8 +119,6 @@ function compareSets(left, right, setSort) {
     : null;
   const leftQuizCount = Number(left.quiz_count) || 0;
   const rightQuizCount = Number(right.quiz_count) || 0;
-  const leftCardCount = Number(left.card_count) || 0;
-  const rightCardCount = Number(right.card_count) || 0;
   const leftDueCardCount = Number(left.due_card_count) || 0;
   const rightDueCardCount = Number(right.due_card_count) || 0;
   const leftNewCardCount = Number(left.new_card_count) || 0;
@@ -146,20 +144,11 @@ function compareSets(left, right, setSort) {
     return 0;
   }
 
-  if (setSort === 'most cards') {
-    if (leftCardCount !== rightCardCount) return rightCardCount - leftCardCount;
-    if (leftAverage === null && rightAverage !== null) return -1;
-    if (leftAverage !== null && rightAverage === null) return 1;
-    if (leftAverage !== rightAverage) return (leftAverage ?? 0) - (rightAverage ?? 0);
-    return 0;
-  }
-
   if (leftDueCardCount !== rightDueCardCount) return rightDueCardCount - leftDueCardCount;
   if (leftNewCardCount !== rightNewCardCount) return rightNewCardCount - leftNewCardCount;
   if (leftAverage === null && rightAverage !== null) return -1;
   if (leftAverage !== null && rightAverage === null) return 1;
   if (leftAverage !== rightAverage) return (leftAverage ?? 0) - (rightAverage ?? 0);
   if (leftQuizCount !== rightQuizCount) return leftQuizCount - rightQuizCount;
-  if (leftCardCount !== rightCardCount) return rightCardCount - leftCardCount;
   return 0;
 }

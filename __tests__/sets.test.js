@@ -32,6 +32,18 @@ describe('set helpers', () => {
     expect(sorted.map((item) => item.id)).toEqual([2, 3, 1]);
   });
 
+  test('priority sort does not use card count as a tie breaker', () => {
+    const sorted = filterAndSortSets(
+      [
+        { id: 1, name: 'A', due_card_count: 0, new_card_count: 0, average_score_percent: 60, quiz_count: 2, card_count: 30 },
+        { id: 2, name: 'B', due_card_count: 0, new_card_count: 0, average_score_percent: 60, quiz_count: 2, card_count: 5 },
+      ],
+      { setSort: 'priority', randomFn: () => 0 }
+    );
+
+    expect(sorted.map((item) => item.id)).toEqual([2, 1]);
+  });
+
   test('filters can isolate weak and selected sets', () => {
     const baseSets = [
       { id: 1, name: 'Weak', due_card_count: 0, new_card_count: 0, average_score_percent: 45, quiz_count: 3, card_count: 10 },

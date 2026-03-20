@@ -6,7 +6,7 @@ import {
   LayoutAnimation,
   Modal,
   Platform,
-  Pressable,
+  Pressable as RNPressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -49,13 +49,13 @@ const DEFAULT_THEME = 'light';
 const QUIZ_FEEDBACK_DELAY_MS = 900;
 const QUIZ_CORRECT_SOUND_DURATION_MS = 700;
 const QUIZ_WRONG_SOUND_DURATION_MS = 850;
-const QUIZ_FEEDBACK_FOLLOWUP_SPEECH_DELAY_MS = 50;
+const QUIZ_FEEDBACK_FOLLOWUP_SPEECH_DELAY_MS = 0;
 const QUIZ_NEXT_FRONT_AUTOPLAY_DELAY_MS = 360;
 const QUIZ_POST_ANSWER_SPEECH_BUFFER_MS = 400;
 const QUIZ_DONT_KNOW_OPTION = "I don't know the answer";
 const HOME_SET_PREVIEW_COUNT = 8;
 const SET_FILTER_OPTIONS = ['all', 'selected', 'unplayed', 'weak', 'strong'];
-const SET_SORT_OPTIONS = ['priority', 'name', 'lowest score', 'highest score', 'most cards'];
+const SET_SORT_OPTIONS = ['priority', 'name', 'lowest score', 'highest score'];
 const QUIZ_DIRECTION_OPTIONS = [
   { value: 'front-to-back', label: 'Front -> Back' },
   { value: 'back-to-front', label: 'Back -> Front' },
@@ -63,6 +63,54 @@ const QUIZ_DIRECTION_OPTIONS = [
 const CORRECT_SOUND = require('./assets/sounds/correct.wav');
 const WRONG_SOUND = require('./assets/sounds/wrong.wav');
 const AnimatedScrollView = Animated.createAnimatedComponent(ScrollView);
+const AnimatedPressableBase = Animated.createAnimatedComponent(RNPressable);
+
+function Pressable({ style, onPressIn, onPressOut, pressScale = 0.982, ...props }) {
+  const scale = useRef(new Animated.Value(1)).current;
+
+  const animatePressIn = useCallback(() => {
+    scale.stopAnimation();
+    Animated.timing(scale, {
+      toValue: pressScale,
+      duration: 55,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start();
+  }, [pressScale, scale]);
+
+  const animatePressOut = useCallback(() => {
+    scale.stopAnimation();
+    Animated.sequence([
+      Animated.timing(scale, {
+        toValue: 1.012,
+        duration: 65,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }),
+      Animated.timing(scale, {
+        toValue: 1,
+        duration: 80,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [scale]);
+
+  return (
+    <AnimatedPressableBase
+      {...props}
+      style={[style, { transform: [{ scale }] }]}
+      onPressIn={(event) => {
+        animatePressIn();
+        onPressIn?.(event);
+      }}
+      onPressOut={(event) => {
+        animatePressOut();
+        onPressOut?.(event);
+      }}
+    />
+  );
+}
 
 export default function App() {
   if (Platform.OS === 'web') {
@@ -1463,7 +1511,8 @@ function AppShell({ storage }) {
                   styles.setRow,
                   { backgroundColor: colors.softSurface, borderColor: colors.border },
                   getSetReviewTone(item, colors),
-                  isSelected && { backgroundColor: colors.softAccent, borderColor: colors.accentBorder },
+                  isSelected && styles.setRowSelected,
+                  isSelected && { borderColor: colors.accentBorder },
                 ]}
                 onPress={() => toggleSetSelection(item.id)}
               >
@@ -1473,7 +1522,19 @@ function AppShell({ storage }) {
                     {formatSetStats(item)}
                   </Text>
                 </View>
-                <Text style={[styles.checkbox, { color: colors.accentText }]}>{isSelected ? '✓' : '○'}</Text>
+                <View
+                  style={[
+                    styles.setSelectionBadge,
+                    {
+                      borderColor: isSelected ? colors.accentBorder : colors.border,
+                      backgroundColor: isSelected ? colors.softAccent : 'transparent',
+                    },
+                  ]}
+                >
+                  <Text style={[styles.checkbox, { color: isSelected ? colors.accentText : colors.secondaryText }]}>
+                    {isSelected ? '✓' : '○'}
+                  </Text>
+                </View>
               </Pressable>
             );
           })
@@ -2051,8 +2112,9 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   setRowSelected: {
-    backgroundColor: '#eef2ff',
-    borderColor: '#9fb1ff',
+    borderWidth: 2,
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
   },
   setName: {
     fontSize: 16,
@@ -2064,9 +2126,18 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   checkbox: {
-    fontSize: 22,
+    fontSize: 18,
     color: '#4461f2',
     fontWeight: '700',
+  },
+  setSelectionBadge: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
   },
   quizSizeRow: {
     flexDirection: 'row',
@@ -2264,6 +2335,7 @@ const styles = StyleSheet.create({
   },
   optionsContainer: {
     gap: 8,
+    paddingHorizontal: 2,
     paddingBottom: 0,
   },
   optionsContainerCompact: {
@@ -2291,7 +2363,7 @@ const styles = StyleSheet.create({
   optionButtonCompact: {
     minHeight: 64,
     paddingVertical: 18,
-    paddingHorizontal: 12,
+    paddingHorizontal: 12
   },
   optionContentRow: {
     flexDirection: 'row',
