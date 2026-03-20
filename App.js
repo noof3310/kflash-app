@@ -383,6 +383,64 @@ function AppShell({ storage }) {
   const isDarkMode = theme === 'dark';
   const colors = useMemo(() => getThemeColors(isDarkMode), [isDarkMode]);
   const statusBarStyle = isDarkMode ? 'light' : 'dark';
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') {
+      return undefined;
+    }
+
+    const { documentElement, body } = document;
+    const root = document.getElementById('root');
+    const previousHtmlBackground = documentElement.style.backgroundColor;
+    const previousHtmlColorScheme = documentElement.style.colorScheme;
+    const previousBodyBackground = body.style.backgroundColor;
+    const previousBodyOverscroll = body.style.overscrollBehaviorY;
+    const previousRootBackground = root?.style.backgroundColor ?? '';
+    const previousRootOverscroll = root?.style.overscrollBehaviorY ?? '';
+
+    documentElement.style.backgroundColor = colors.screenBackground;
+    documentElement.style.colorScheme = isDarkMode ? 'dark' : 'light';
+    body.style.backgroundColor = colors.screenBackground;
+    body.style.overscrollBehaviorY = 'none';
+
+    if (root) {
+      root.style.backgroundColor = colors.screenBackground;
+      root.style.overscrollBehaviorY = 'none';
+    }
+
+    let themeColorMeta = document.querySelector('meta[name="theme-color"]');
+    let createdThemeColorMeta = false;
+    if (!themeColorMeta) {
+      themeColorMeta = document.createElement('meta');
+      themeColorMeta.setAttribute('name', 'theme-color');
+      document.head.appendChild(themeColorMeta);
+      createdThemeColorMeta = true;
+    }
+    const previousThemeColor = themeColorMeta.getAttribute('content');
+    themeColorMeta.setAttribute('content', colors.screenBackground);
+
+    return () => {
+      documentElement.style.backgroundColor = previousHtmlBackground;
+      documentElement.style.colorScheme = previousHtmlColorScheme;
+      body.style.backgroundColor = previousBodyBackground;
+      body.style.overscrollBehaviorY = previousBodyOverscroll;
+
+      if (root) {
+        root.style.backgroundColor = previousRootBackground;
+        root.style.overscrollBehaviorY = previousRootOverscroll;
+      }
+
+      if (themeColorMeta) {
+        if (previousThemeColor) {
+          themeColorMeta.setAttribute('content', previousThemeColor);
+        } else if (createdThemeColorMeta) {
+          themeColorMeta.remove();
+        } else {
+          themeColorMeta.removeAttribute('content');
+        }
+      }
+    };
+  }, [colors.screenBackground, isDarkMode]);
   const animatedScreenStyle = {
     opacity: screenOpacity,
     transform: [{ translateY: screenTranslateY }],
