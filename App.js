@@ -47,6 +47,11 @@ const DEFAULT_TTS_RATE = 0.9;
 const DEFAULT_TTS_PITCH = 1.0;
 const DEFAULT_THEME = 'light';
 const QUIZ_FEEDBACK_DELAY_MS = 900;
+const QUIZ_CORRECT_SOUND_DURATION_MS = 700;
+const QUIZ_WRONG_SOUND_DURATION_MS = 850;
+const QUIZ_FEEDBACK_FOLLOWUP_SPEECH_DELAY_MS = 50;
+const QUIZ_NEXT_FRONT_AUTOPLAY_DELAY_MS = 360;
+const QUIZ_POST_ANSWER_SPEECH_BUFFER_MS = 400;
 const QUIZ_DONT_KNOW_OPTION = "I don't know the answer";
 const HOME_SET_PREVIEW_COUNT = 8;
 const SET_FILTER_OPTIONS = ['all', 'selected', 'unplayed', 'weak', 'strong'];
@@ -118,6 +123,7 @@ function AppShell({ storage }) {
   const [reviewScreenKey, setReviewScreenKey] = useState(0);
   const feedbackTimeoutRef = useRef(null);
   const feedbackSoundRequestRef = useRef(0);
+  const nextPromptAutoplayDelayRef = useRef(0);
   const reviewScrollRef = useRef(null);
   const screenOpacity = useRef(new Animated.Value(0)).current;
   const screenTranslateY = useRef(new Animated.Value(18)).current;
@@ -421,10 +427,25 @@ function AppShell({ storage }) {
   const progressText = quizTargetCount ? `${Math.min(quizIndex + 1, quizTargetCount)} / ${quizTargetCount}` : '0 / 0';
 
   useEffect(() => {
-    if (screen === 'quiz' && currentItem?.promptText && currentItem?.promptField === 'front') {
-      speakFrontText(currentItem.promptText);
+    if (screen !== 'quiz' || currentItem?.promptField !== 'front' || !currentItem?.promptText) {
+      return undefined;
     }
+
+    const delayMs = nextPromptAutoplayDelayRef.current;
+    nextPromptAutoplayDelayRef.current = 0;
+    const timeoutId = setTimeout(() => {
+      speakFrontText(currentItem.promptText);
+    }, delayMs);
+
+    return () => clearTimeout(timeoutId);
   }, [currentItem?.promptField, currentItem?.promptText, screen, ttsPitch, ttsRate]);
+
+  const prepareNextQuestionAutoplay = (previousItem, nextItem) => {
+    nextPromptAutoplayDelayRef.current =
+      previousItem?.promptField === 'back' && nextItem?.promptField === 'front'
+        ? QUIZ_NEXT_FRONT_AUTOPLAY_DELAY_MS
+        : 0;
+  };
 
   const handleAnswer = async (option) => {
     if (!currentItem || quizFeedback) {
@@ -454,10 +475,11 @@ function AppShell({ storage }) {
       correctOption: currentItem.correctOption,
     });
     requestAnimationFrame(() => {
-      playFeedbackSound(isCorrect).catch(() => {});
+      playPostAnswerAudio(currentItem, isCorrect).catch(() => {});
     });
 
     if (isCorrect) {
+      const nextAdvanceDelay = getQuizAdvanceDelayMs(currentItem, ttsRate);
       feedbackTimeoutRef.current = setTimeout(async () => {
         setQuizFeedback(null);
 
@@ -472,6 +494,7 @@ function AppShell({ storage }) {
             quizDirectionMode
           );
           if (nextQuizItem) {
+            prepareNextQuestionAutoplay(currentItem, nextQuizItem);
             setQuizItems((prev) => [...prev, nextQuizItem]);
           }
           setQuizIndex((prev) => prev + 1);
@@ -480,7 +503,7 @@ function AppShell({ storage }) {
 
         await storage.saveQuizSession(selectedSetIds, nextAnswers);
         setScreen('results');
-      }, QUIZ_FEEDBACK_DELAY_MS);
+      }, nextAdvanceDelay);
     }
   };
 
@@ -694,18 +717,34 @@ function AppShell({ storage }) {
         await wait(40);
       }
       if (feedbackSoundRequestRef.current !== requestId) {
-        return;
+        return null;
       }
 
       const player = isCorrect ? correctPlayer : wrongPlayer;
       player.seekTo(0);
       player.play();
+      return requestId;
     } catch (error) {
       Speech.speak(isCorrect ? 'Correct' : 'Incorrect', {
         rate: 0.95,
         pitch: isCorrect ? 1.0 : 0.85,
       });
+      return requestId;
     }
+  };
+
+  const playPostAnswerAudio = async (quizItem, isCorrect) => {
+    const requestId = await playFeedbackSound(isCorrect);
+    if (!requestId || quizItem?.promptField !== 'back') {
+      return;
+    }
+
+    await wait(getPostFeedbackSpeechDelayMs(isCorrect));
+    if (feedbackSoundRequestRef.current !== requestId) {
+      return;
+    }
+
+    speakFrontText(quizItem.front);
   };
 
   const updateSpeechSetting = useCallback(
@@ -1142,10 +1181,11 @@ function AppShell({ storage }) {
                       QUIZ_DONT_KNOW_OPTION,
                       distractorBiasMap,
                       quizDirectionMode
-                    );
-                    if (nextQuizItem) {
-                      setQuizItems((prev) => [...prev, nextQuizItem]);
-                    }
+                  );
+                  if (nextQuizItem) {
+                    prepareNextQuestionAutoplay(currentItem, nextQuizItem);
+                    setQuizItems((prev) => [...prev, nextQuizItem]);
+                  }
                     setQuizIndex((prev) => prev + 1);
                     return;
                   }
@@ -1636,6 +1676,38 @@ function wait(ms) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+function estimateSpeechDurationMs(text, rate) {
+  const normalizedText = String(text ?? '').trim();
+  if (!normalizedText) {
+    return 0;
+  }
+
+  const safeRate = Math.max(Number(rate) || DEFAULT_TTS_RATE, 0.3);
+  const charDurationMs = /[가-힣]/.test(normalizedText) ? 140 : 110;
+  const estimated = normalizedText.length * (charDurationMs / safeRate);
+  return Math.max(estimated, 650);
+}
+
+function getQuizAdvanceDelayMs(quizItem, ttsRate) {
+  if (quizItem?.promptField !== 'back') {
+    return QUIZ_FEEDBACK_DELAY_MS;
+  }
+
+  return Math.max(
+    QUIZ_FEEDBACK_DELAY_MS,
+    getPostFeedbackSpeechDelayMs(true) +
+      estimateSpeechDurationMs(quizItem.front, ttsRate) +
+      QUIZ_POST_ANSWER_SPEECH_BUFFER_MS
+  );
+}
+
+function getPostFeedbackSpeechDelayMs(isCorrect) {
+  return (
+    (isCorrect ? QUIZ_CORRECT_SOUND_DURATION_MS : QUIZ_WRONG_SOUND_DURATION_MS) +
+    QUIZ_FEEDBACK_FOLLOWUP_SPEECH_DELAY_MS
+  );
 }
 
 function downloadCsvOnWeb(filename, csvText) {
