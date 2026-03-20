@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Animated,
@@ -120,6 +120,10 @@ function AppShell({ storage }) {
   const heroFloat = useRef(new Animated.Value(10)).current;
   const correctPlayer = useAudioPlayer(CORRECT_SOUND);
   const wrongPlayer = useAudioPlayer(WRONG_SOUND);
+  const scrollReviewToTop = useCallback(() => {
+    const scrollTarget = reviewScrollRef.current?.getNode?.() ?? reviewScrollRef.current;
+    scrollTarget?.scrollTo?.({ y: 0, animated: false });
+  }, []);
 
   const refreshAll = useCallback(async () => {
     const dashboardData = await storage.getDashboardData();
@@ -198,17 +202,19 @@ function AppShell({ storage }) {
     return undefined;
   }, [heroFloat, screen, selectedSetIds.length]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (screen !== 'review') {
       return undefined;
     }
 
-    const timeoutId = setTimeout(() => {
-      reviewScrollRef.current?.scrollTo({ y: 0, animated: false });
-    }, 0);
+    const frameId = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        scrollReviewToTop();
+      });
+    });
 
-    return () => clearTimeout(timeoutId);
-  }, [reviewCards.length, screen]);
+    return () => cancelAnimationFrame(frameId);
+  }, [reviewCards.length, screen, scrollReviewToTop]);
 
   const totalCards = cards.length;
   const totalSets = sets.length;
@@ -739,6 +745,7 @@ function AppShell({ storage }) {
           style={animatedScreenStyle}
           contentContainerStyle={[styles.container, styles.containerWithFooter]}
           showsVerticalScrollIndicator={false}
+          onContentSizeChange={scrollReviewToTop}
         >
           <View style={styles.quizHeaderRow}>
             <Pressable
