@@ -1,59 +1,121 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
+
+const FEEDBACK_GAIN = 1.35;
 
 export async function setAudioModeAsync() {}
 
 export function useAudioPlayer(source) {
-  const audio = useMemo(() => {
-    if (typeof Audio === 'undefined') {
-      return null;
-    }
-
-    const assetSource = Array.isArray(source) ? source[0] : source;
-    const uri = typeof assetSource === 'string' ? assetSource : assetSource?.uri;
-    if (!uri) {
-      return null;
-    }
-
-    const nextAudio = new Audio(uri);
-    nextAudio.preload = 'auto';
-    nextAudio.volume = 1;
-    nextAudio.defaultMuted = false;
-    nextAudio.muted = false;
-    return nextAudio;
-  }, [source]);
+  const audioContextRef = useRef(null);
+  const audioBufferRef = useRef(null);
+  const sourceNodeRef = useRef(null);
+  const gainNodeRef = useRef(null);
+  const seekOffsetRef = useRef(0);
+  const assetUri = getAssetUri(source);
 
   useEffect(() => {
+    if (typeof window === 'undefined') {
+      return undefined;
+    }
+
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass || !assetUri) {
+      return undefined;
+    }
+
+    const context = new AudioContextClass();
+    const gainNode = context.createGain();
+    gainNode.gain.value = FEEDBACK_GAIN;
+    gainNode.connect(context.destination);
+
+    audioContextRef.current = context;
+    gainNodeRef.current = gainNode;
+
+    let cancelled = false;
+
+    fetch(assetUri)
+      .then((response) => response.arrayBuffer())
+      .then((arrayBuffer) => context.decodeAudioData(arrayBuffer))
+      .then((buffer) => {
+        if (!cancelled) {
+          audioBufferRef.current = buffer;
+        }
+      })
+      .catch(() => {});
+
     return () => {
-      if (!audio) {
-        return;
+      cancelled = true;
+
+      if (sourceNodeRef.current) {
+        try {
+          sourceNodeRef.current.stop();
+        } catch {}
+        sourceNodeRef.current.disconnect();
       }
 
-      audio.pause();
-      audio.src = '';
+      gainNode.disconnect();
+      context.close().catch(() => {});
+      sourceNodeRef.current = null;
+      gainNodeRef.current = null;
+      audioContextRef.current = null;
+      audioBufferRef.current = null;
     };
-  }, [audio]);
+  }, [assetUri]);
 
   return useMemo(
     () => ({
       async play() {
-        if (!audio) {
+        const context = audioContextRef.current;
+        const buffer = audioBufferRef.current;
+        const gainNode = gainNodeRef.current;
+
+        if (!context || !buffer || !gainNode) {
           return;
         }
 
-        audio.volume = 1;
-        await audio.play();
+        if (context.state === 'suspended') {
+          await context.resume();
+        }
+
+        if (sourceNodeRef.current) {
+          try {
+            sourceNodeRef.current.stop();
+          } catch {}
+          sourceNodeRef.current.disconnect();
+        }
+
+        const sourceNode = context.createBufferSource();
+        sourceNode.buffer = buffer;
+        sourceNode.connect(gainNode);
+        sourceNode.start(0, Math.max(0, seekOffsetRef.current));
+        sourceNode.onended = () => {
+          if (sourceNodeRef.current === sourceNode) {
+            sourceNodeRef.current = null;
+          }
+        };
+
+        sourceNodeRef.current = sourceNode;
+        seekOffsetRef.current = 0;
       },
       pause() {
-        audio?.pause();
-      },
-      seekTo(seconds) {
-        if (!audio) {
+        if (!sourceNodeRef.current) {
           return;
         }
 
-        audio.currentTime = Number(seconds) || 0;
+        try {
+          sourceNodeRef.current.stop();
+        } catch {}
+        sourceNodeRef.current.disconnect();
+        sourceNodeRef.current = null;
+      },
+      seekTo(seconds) {
+        seekOffsetRef.current = Number(seconds) || 0;
       },
     }),
-    [audio]
+    []
   );
+}
+
+function getAssetUri(source) {
+  const assetSource = Array.isArray(source) ? source[0] : source;
+  return typeof assetSource === 'string' ? assetSource : assetSource?.uri ?? null;
 }
