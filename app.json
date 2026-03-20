@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "Flash Card",
+    "slug": "flash-card",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.noof.flashcard"
+    },
+    "plugins": [
+      "expo-audio"
+    ]
+  }
+}
