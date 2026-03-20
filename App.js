@@ -15,7 +15,7 @@ import {
   View,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { setAudioModeAsync, useAudioPlayer } from 'expo-audio';
+import { setAudioModeAsync, useAudioPlayer } from './src/lib/audio';
 import * as Speech from 'expo-speech';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -57,12 +57,18 @@ const AnimatedScrollView = Animated.createAnimatedComponent(ScrollView);
 
 export default function App() {
   if (Platform.OS === 'web') {
-    return <WebAppShell />;
+    return (
+      <AppErrorBoundary>
+        <WebAppShell />
+      </AppErrorBoundary>
+    );
   }
 
   return (
     <SQLiteProvider databaseName={DB_NAME} onInit={migrateDbIfNeeded}>
-      <NativeAppShell />
+      <AppErrorBoundary>
+        <NativeAppShell />
+      </AppErrorBoundary>
     </SQLiteProvider>
   );
 }
@@ -1457,6 +1463,34 @@ function wait(ms) {
   });
 }
 
+class AppErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  render() {
+    if (!this.state.error) {
+      return this.props.children;
+    }
+
+    return (
+      <SafeAreaView style={[styles.safeArea, styles.errorBoundarySafeArea]}>
+        <View style={styles.errorBoundaryContainer}>
+          <Text style={styles.errorBoundaryTitle}>App failed to load</Text>
+          <Text style={styles.errorBoundaryMessage}>
+            {this.state.error?.message ?? 'Unknown runtime error'}
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+}
+
 async function readImportedText(asset) {
   if (asset?.file && typeof asset.file.text === 'function') {
     return asset.file.text();
@@ -1468,6 +1502,25 @@ async function readImportedText(asset) {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
+  },
+  errorBoundarySafeArea: {
+    backgroundColor: '#f5f7fb',
+  },
+  errorBoundaryContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    padding: 24,
+    gap: 12,
+  },
+  errorBoundaryTitle: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#172033',
+  },
+  errorBoundaryMessage: {
+    fontSize: 15,
+    lineHeight: 22,
+    color: '#5f6b85',
   },
   screen: {
     flex: 1,
