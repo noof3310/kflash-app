@@ -60,6 +60,21 @@ const QUIZ_DIRECTION_OPTIONS = [
   { value: 'front-to-back', label: 'Front -> Back' },
   { value: 'back-to-front', label: 'Back -> Front' },
 ];
+const EXAMPLE_CSV_TEXT = `front,type,back,set
+은 / 는,marker,topic marker,Example
+가다,v.,ไป,Example
+오다,v.,มา,Example
+하다,v.,ทำ,Example
+먹다,v.,กิน,Example
+보다,v.,ดู / เห็น,Example
+오늘,n.,วันนี้,Example
+지금,adv.,ตอนนี้,Example
+집,n.,บ้าน,Example
+학교,n.,โรงเรียน,Example
+친구,n.,เพื่อน,Example
+사람,n.,คน,Example
+여기,adv.,ที่นี่,Example
+저기,adv.,ตรงนั้น / ที่นั่น,Example`;
 const CORRECT_SOUND = require('./assets/sounds/correct.wav');
 const WRONG_SOUND = require('./assets/sounds/wrong.wav');
 const AnimatedScrollView = Animated.createAnimatedComponent(ScrollView);
@@ -663,28 +678,7 @@ function AppShell({ storage }) {
       }
 
       const csvText = await readImportedText(asset);
-      const parsed = Papa.parse(csvText, {
-        header: true,
-        skipEmptyLines: true,
-        transformHeader: (header) => header.trim().toLowerCase(),
-      });
-
-      if (parsed.errors?.length) {
-        throw new Error(parsed.errors[0].message);
-      }
-
-      const rows = (parsed.data ?? [])
-        .map((row) => ({
-          front: String(row.front ?? '').trim(),
-          type: String(row.type ?? '').trim(),
-          back: String(row.back ?? '').trim(),
-          set: String(row.set ?? '').trim() || 'Imported',
-        }))
-        .filter((row) => row.front && row.type && row.back);
-
-      if (rows.length === 0) {
-        throw new Error('CSV has no usable rows. Required columns: front, type, back, set');
-      }
+      const rows = parseImportCsvRows(csvText);
 
       await storage.importCsvRows(rows);
 
@@ -694,6 +688,17 @@ function AppShell({ storage }) {
       showAlert('Import failed', error?.message ?? 'Something went sideways while importing.');
     } finally {
       setImporting(false);
+    }
+  };
+
+  const handleImportExampleSet = async () => {
+    try {
+      const rows = parseImportCsvRows(EXAMPLE_CSV_TEXT);
+      await storage.importCsvRows(rows);
+      await refreshAll();
+      showAlert('Example set ready', `Loaded ${rows.length} cards into the Example set.`);
+    } catch (error) {
+      showAlert('Could not load example set', error?.message ?? 'Something went wrong while loading the example set.');
     }
   };
 
@@ -1461,10 +1466,30 @@ function AppShell({ storage }) {
         </View>
       </View>
 
-      <View style={styles.actionsRow}>
-        <Pressable style={[styles.primaryButton, { backgroundColor: colors.primaryButton }]} onPress={handleImportCsv} disabled={importing}>
-          <Text style={[styles.primaryButtonText, { color: colors.primaryButtonText }]}>{importing ? 'Importing...' : 'Import CSV'}</Text>
-        </Pressable>
+      <View style={[styles.sectionCard, styles.compactSectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>Import vocabulary</Text>
+        <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
+          CSV must use exactly these columns: <Text style={[styles.inlineCodeText, { color: colors.primaryText }]}>front,type,back,set</Text>.
+          Each row becomes one card, and the <Text style={[styles.inlineCodeText, { color: colors.primaryText }]}>set</Text> value controls which set it appears in.
+        </Text>
+        <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
+          Use short type values like <Text style={[styles.inlineCodeText, { color: colors.primaryText }]}>marker</Text>, <Text style={[styles.inlineCodeText, { color: colors.primaryText }]}>v.</Text>, <Text style={[styles.inlineCodeText, { color: colors.primaryText }]}>n.</Text>, or <Text style={[styles.inlineCodeText, { color: colors.primaryText }]}>adv.</Text>.
+        </Text>
+        <View style={[styles.csvExampleCard, { backgroundColor: colors.inputBackground, borderColor: colors.border }]}>
+          <Text style={[styles.csvExampleText, { color: colors.primaryText }]}>
+            {'front,type,back,set\n은 / 는,marker,topic marker,Example\n가다,v.,ไป,Example\n오늘,n.,วันนี้,Example'}
+          </Text>
+        </View>
+        <View style={styles.importActionsColumn}>
+          <Pressable style={[styles.primaryButton, { backgroundColor: colors.primaryButton }]} onPress={handleImportCsv} disabled={importing}>
+            <Text style={[styles.primaryButtonText, { color: colors.primaryButtonText }]}>
+              {importing ? 'Importing...' : 'Import CSV'}
+            </Text>
+          </Pressable>
+          <Pressable style={[styles.secondaryButton, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={handleImportExampleSet}>
+            <Text style={[styles.secondaryButtonText, { color: colors.primaryText }]}>Load example set</Text>
+          </Pressable>
+        </View>
       </View>
 
       <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -1797,6 +1822,33 @@ function wait(ms) {
   });
 }
 
+function parseImportCsvRows(csvText) {
+  const parsed = Papa.parse(csvText, {
+    header: true,
+    skipEmptyLines: true,
+    transformHeader: (header) => header.trim().toLowerCase(),
+  });
+
+  if (parsed.errors?.length) {
+    throw new Error(parsed.errors[0].message);
+  }
+
+  const rows = (parsed.data ?? [])
+    .map((row) => ({
+      front: String(row.front ?? '').trim(),
+      type: String(row.type ?? '').trim(),
+      back: String(row.back ?? '').trim(),
+      set: String(row.set ?? '').trim() || 'Imported',
+    }))
+    .filter((row) => row.front && row.type && row.back);
+
+  if (rows.length === 0) {
+    throw new Error('CSV has no usable rows. Required columns: front, type, back, set');
+  }
+
+  return rows;
+}
+
 function estimateSpeechDurationMs(text, rate) {
   const normalizedText = String(text ?? '').trim();
   if (!normalizedText) {
@@ -2084,6 +2136,31 @@ const styles = StyleSheet.create({
   actionsRow: {
     flexDirection: 'row',
     gap: 10,
+  },
+  importActionsColumn: {
+    gap: 10,
+  },
+  csvExampleCard: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 12,
+  },
+  csvExampleText: {
+    fontSize: 13,
+    lineHeight: 19,
+    fontFamily: Platform.select({
+      ios: 'Menlo',
+      android: 'monospace',
+      default: 'monospace',
+    }),
+  },
+  inlineCodeText: {
+    fontFamily: Platform.select({
+      ios: 'Menlo',
+      android: 'monospace',
+      default: 'monospace',
+    }),
+    fontSize: 13,
   },
   primaryButton: {
     flex: 1,
