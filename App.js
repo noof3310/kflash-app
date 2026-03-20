@@ -1212,25 +1212,6 @@ function AppShell({ storage }) {
       </View>
 
       <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-        <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>Data tools</Text>
-        <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
-          Export your card-level learning progress as a CSV file.
-        </Text>
-        <Pressable
-          style={[styles.secondaryButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
-          onPress={handleExportLearningProgress}
-        >
-          <Text style={[styles.secondaryButtonText, { color: colors.primaryText }]}>Export learning progress</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.secondaryButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
-          onPress={handleImportLearningProgress}
-        >
-          <Text style={[styles.secondaryButtonText, { color: colors.primaryText }]}>Import learning progress</Text>
-        </Pressable>
-      </View>
-
-      <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>Select sets</Text>
         <TextInput
           value={setSearchQuery}
@@ -1426,6 +1407,25 @@ function AppShell({ storage }) {
           onPress={() => speakFrontText(findSpeechPreviewText(cards))}
         >
           <Text style={[styles.secondaryButtonText, { color: colors.primaryText }]}>Preview speech</Text>
+        </Pressable>
+      </View>
+
+      <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>Data tools</Text>
+        <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
+          Export or restore your card-level learning progress as a CSV backup.
+        </Text>
+        <Pressable
+          style={[styles.secondaryButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+          onPress={handleExportLearningProgress}
+        >
+          <Text style={[styles.secondaryButtonText, { color: colors.primaryText }]}>Export learning progress</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.secondaryButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+          onPress={handleImportLearningProgress}
+        >
+          <Text style={[styles.secondaryButtonText, { color: colors.primaryText }]}>Import learning progress</Text>
         </Pressable>
       </View>
 
