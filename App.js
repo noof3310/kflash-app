@@ -531,6 +531,101 @@ function AppShell({ storage }) {
     }
   };
 
+  const handleExportLearningProgress = async () => {
+    try {
+      const rows = await storage.exportLearningProgressRows();
+
+      if (!rows.length) {
+        showAlert('Nothing to export', 'There is no learning progress to export yet.');
+        return;
+      }
+
+      const csvText = Papa.unparse(rows);
+      const filename = `learning-progress-${new Date().toISOString().slice(0, 10)}.csv`;
+
+      if (Platform.OS === 'web') {
+        downloadCsvOnWeb(filename, csvText);
+        showAlert('Export ready', 'Your learning progress CSV has been downloaded.');
+        return;
+      }
+
+      const documentDirectory = FileSystem.documentDirectory || FileSystem.cacheDirectory;
+      if (!documentDirectory) {
+        throw new Error('No writable export directory is available on this device.');
+      }
+
+      const fileUri = `${documentDirectory}${filename}`;
+      await FileSystem.writeAsStringAsync(fileUri, csvText);
+      showAlert('Export saved', `Learning progress exported to:\n\n${fileUri}`);
+    } catch (error) {
+      showAlert('Export failed', error?.message ?? 'Could not export learning progress.');
+    }
+  };
+
+  const handleImportLearningProgress = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['text/csv', 'text/comma-separated-values', 'public.comma-separated-values-text'],
+        multiple: false,
+        copyToCacheDirectory: true,
+      });
+
+      if (result.canceled) {
+        return;
+      }
+
+      const asset = result.assets?.[0];
+      if (!asset) {
+        throw new Error('Could not read the selected backup file.');
+      }
+
+      const csvText = await readImportedText(asset);
+      const parsed = Papa.parse(csvText, {
+        header: true,
+        skipEmptyLines: true,
+        transformHeader: (header) => header.trim().toLowerCase(),
+      });
+
+      if (parsed.errors?.length) {
+        throw new Error(parsed.errors[0].message);
+      }
+
+      const rows = normalizeImportedLearningProgressRows(parsed.data ?? []);
+      if (!rows.length) {
+        throw new Error(
+          'Backup has no usable rows. Required columns: front, type, back, sets, attempt_count, correct_count'
+        );
+      }
+
+      showConfirm({
+        title: 'Import learning progress?',
+        message:
+          'This will replace current learning progress stats on this device with the backup file. Cards and sets from the backup will be merged in.',
+        confirmText: 'Import backup',
+        destructive: true,
+        onConfirm: async () => {
+          try {
+            await storage.importLearningProgressRows(rows);
+            await refreshAll();
+            setQuizFeedback(null);
+            setReviewCards([]);
+            setDistractorBiasMap({});
+            setQuizItems([]);
+            setQuizIndex(0);
+            setAnswers([]);
+            setQuizTargetCount(0);
+            setScreen('home');
+            showAlert('Import complete', `Restored learning progress for ${rows.length} cards.`);
+          } catch (error) {
+            showAlert('Import failed', error?.message ?? 'Could not import learning progress.');
+          }
+        },
+      });
+    } catch (error) {
+      showAlert('Import failed', error?.message ?? 'Could not import learning progress.');
+    }
+  };
+
   const toggleSetSelection = (setId) => {
     setSelectedSetIds((prev) =>
       prev.includes(setId) ? prev.filter((id) => id !== setId) : [...prev, setId]
@@ -1117,6 +1212,25 @@ function AppShell({ storage }) {
       </View>
 
       <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>Data tools</Text>
+        <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
+          Export your card-level learning progress as a CSV file.
+        </Text>
+        <Pressable
+          style={[styles.secondaryButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+          onPress={handleExportLearningProgress}
+        >
+          <Text style={[styles.secondaryButtonText, { color: colors.primaryText }]}>Export learning progress</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.secondaryButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+          onPress={handleImportLearningProgress}
+        >
+          <Text style={[styles.secondaryButtonText, { color: colors.primaryText }]}>Import learning progress</Text>
+        </Pressable>
+      </View>
+
+      <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>Select sets</Text>
         <TextInput
           value={setSearchQuery}
@@ -1412,6 +1526,55 @@ function wait(ms) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+function downloadCsvOnWeb(filename, csvText) {
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    return;
+  }
+
+  const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8;' });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+}
+
+function normalizeImportedLearningProgressRows(rawRows) {
+  return (rawRows ?? [])
+    .map((row) => {
+      const front = String(row.front ?? '').trim();
+      const type = String(row.type ?? '').trim();
+      const back = String(row.back ?? '').trim();
+      const setNames = String(row.sets ?? '')
+        .split('|')
+        .map((value) => value.trim())
+        .filter(Boolean);
+      const attemptCount = Math.max(0, Number.parseInt(String(row.attempt_count ?? '0'), 10) || 0);
+      const correctCount = Math.min(
+        attemptCount,
+        Math.max(0, Number.parseInt(String(row.correct_count ?? '0'), 10) || 0)
+      );
+
+      return {
+        front,
+        type,
+        back,
+        setNames,
+        attemptCount,
+        correctCount,
+        incorrectCount: Math.max(0, attemptCount - correctCount),
+        lastReviewedAt: String(row.last_reviewed_at ?? '').trim(),
+        nextDueAt: String(row.next_due_at ?? '').trim(),
+        correctStreak: Math.max(0, Number.parseInt(String(row.correct_streak ?? '0'), 10) || 0),
+        intervalDays: Math.max(0, Number.parseInt(String(row.interval_days ?? '0'), 10) || 0),
+      };
+    })
+    .filter((row) => row.front && row.type && row.back);
 }
 
 function showAlert(title, message) {

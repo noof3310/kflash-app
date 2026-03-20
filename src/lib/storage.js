@@ -174,6 +174,149 @@ export function createNativeStorage(db) {
       return saveQuizSession(db, selectedSetIds, answers);
     },
 
+    async exportLearningProgressRows() {
+      const rows = await db.getAllAsync(
+        `SELECT c.front,
+                c.type,
+                c.back,
+                COALESCE(GROUP_CONCAT(DISTINCT s.name), '') AS sets,
+                COALESCE(qa_stats.attempt_count, 0) AS attempt_count,
+                COALESCE(qa_stats.correct_count, 0) AS correct_count,
+                cp.last_reviewed_at,
+                cp.next_due_at,
+                COALESCE(cp.correct_streak, 0) AS correct_streak,
+                COALESCE(cp.interval_days, 0) AS interval_days
+         FROM cards c
+         LEFT JOIN set_cards sc ON sc.card_id = c.id
+         LEFT JOIN sets s ON s.id = sc.set_id
+         LEFT JOIN (
+           SELECT card_id,
+                  COUNT(*) AS attempt_count,
+                  COALESCE(SUM(is_correct), 0) AS correct_count
+           FROM quiz_answers
+           GROUP BY card_id
+         ) qa_stats ON qa_stats.card_id = c.id
+         LEFT JOIN card_progress cp ON cp.card_id = c.id
+         GROUP BY c.id, c.front, c.type, c.back, qa_stats.attempt_count, qa_stats.correct_count,
+                  cp.last_reviewed_at, cp.next_due_at, cp.correct_streak, cp.interval_days
+         ORDER BY c.front COLLATE NOCASE ASC`
+      );
+
+      return buildExportRows(rows ?? []);
+    },
+
+    async importLearningProgressRows(rows) {
+      await db.withTransactionAsync(async () => {
+        await db.runAsync('DELETE FROM quiz_answers');
+        await db.runAsync('DELETE FROM quiz_sessions');
+        await db.runAsync('DELETE FROM card_progress');
+
+        const importedCards = [];
+        const setAccuracyStats = new Map();
+
+        for (const row of rows) {
+          const setIds = [];
+          for (const setName of row.setNames) {
+            let setRecord = await db.getFirstAsync(
+              'SELECT id FROM sets WHERE lower(name) = lower(?) LIMIT 1',
+              [setName]
+            );
+
+            if (!setRecord) {
+              const createSetResult = await db.runAsync('INSERT INTO sets (name) VALUES (?)', [setName]);
+              setRecord = { id: createSetResult.lastInsertRowId };
+            }
+
+            setIds.push(Number(setRecord.id));
+          }
+
+          let cardRecord = await db.getFirstAsync(
+            'SELECT id FROM cards WHERE front = ? AND type = ? AND back = ? LIMIT 1',
+            [row.front, row.type, row.back]
+          );
+
+          if (!cardRecord) {
+            const createCardResult = await db.runAsync(
+              'INSERT INTO cards (front, type, back) VALUES (?, ?, ?)',
+              [row.front, row.type, row.back]
+            );
+            cardRecord = { id: createCardResult.lastInsertRowId };
+          }
+
+          for (const setId of setIds) {
+            await db.runAsync(
+              'INSERT OR IGNORE INTO set_cards (set_id, card_id) VALUES (?, ?)',
+              [setId, cardRecord.id]
+            );
+          }
+
+          importedCards.push({
+            ...row,
+            cardId: Number(cardRecord.id),
+          });
+
+          for (const setId of setIds) {
+            const current = setAccuracyStats.get(setId) ?? { attempts: 0, correct: 0 };
+            current.attempts += row.attemptCount;
+            current.correct += row.correctCount;
+            setAccuracyStats.set(setId, current);
+          }
+        }
+
+        const answersSessionResult = await db.runAsync(
+          'INSERT INTO quiz_sessions (score, total, selected_set_ids) VALUES (?, ?, ?)',
+          [0, 0, '[]']
+        );
+
+        const answersSessionId = Number(answersSessionResult.lastInsertRowId);
+
+        for (const row of importedCards) {
+          for (let index = 0; index < row.correctCount; index += 1) {
+            await db.runAsync(
+              'INSERT INTO quiz_answers (quiz_session_id, card_id, chosen_back, is_correct) VALUES (?, ?, ?, ?)',
+              [answersSessionId, row.cardId, row.back, 1]
+            );
+          }
+
+          for (let index = 0; index < row.incorrectCount; index += 1) {
+            await db.runAsync(
+              'INSERT INTO quiz_answers (quiz_session_id, card_id, chosen_back, is_correct) VALUES (?, ?, ?, ?)',
+              [answersSessionId, row.cardId, '__imported_incorrect__', 0]
+            );
+          }
+
+          await db.runAsync(
+            `INSERT INTO card_progress (card_id, last_reviewed_at, next_due_at, correct_streak, interval_days)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(card_id) DO UPDATE SET
+               last_reviewed_at = excluded.last_reviewed_at,
+               next_due_at = excluded.next_due_at,
+               correct_streak = excluded.correct_streak,
+               interval_days = excluded.interval_days`,
+            [
+              row.cardId,
+              row.lastReviewedAt || null,
+              row.nextDueAt || null,
+              row.correctStreak,
+              row.intervalDays,
+            ]
+          );
+        }
+
+        for (const [setId, stats] of setAccuracyStats.entries()) {
+          if (!stats.attempts) {
+            continue;
+          }
+
+          const score = Math.round((stats.correct / stats.attempts) * 100);
+          await db.runAsync(
+            'INSERT INTO quiz_sessions (score, total, selected_set_ids) VALUES (?, ?, ?)',
+            [score, 100, JSON.stringify([setId])]
+          );
+        }
+      });
+    },
+
     clearAllData() {
       return db.withTransactionAsync(async () => {
         await db.runAsync('DELETE FROM card_progress');
@@ -332,6 +475,131 @@ export function createWebStorage() {
       }
 
       updateWebCardProgress(store, answers);
+      writeWebStore(store);
+    },
+
+    async exportLearningProgressRows() {
+      const store = readWebStore();
+      return buildExportRows(buildExportRowsFromStore(store));
+    },
+
+    async importLearningProgressRows(rows) {
+      const store = readWebStore();
+      store.quizSessions = [];
+      store.quizAnswers = [];
+      store.cardProgress = [];
+
+      const setAccuracyStats = new Map();
+      const importedCards = [];
+
+      for (const row of rows) {
+        const setIds = [];
+        for (const setName of row.setNames) {
+          let setRecord = store.sets.find((item) => item.name.toLowerCase() === setName.toLowerCase());
+          if (!setRecord) {
+            setRecord = {
+              id: store.nextIds.set++,
+              name: setName,
+              created_at: nowIso(),
+            };
+            store.sets.push(setRecord);
+          }
+
+          setIds.push(setRecord.id);
+        }
+
+        let cardRecord = store.cards.find(
+          (item) => item.front === row.front && item.type === row.type && item.back === row.back
+        );
+        if (!cardRecord) {
+          cardRecord = {
+            id: store.nextIds.card++,
+            front: row.front,
+            type: row.type,
+            back: row.back,
+            created_at: nowIso(),
+          };
+          store.cards.push(cardRecord);
+        }
+
+        for (const setId of setIds) {
+          const exists = store.setCards.some(
+            (item) => item.set_id === setId && item.card_id === cardRecord.id
+          );
+          if (!exists) {
+            store.setCards.push({
+              set_id: setId,
+              card_id: cardRecord.id,
+            });
+          }
+        }
+
+        importedCards.push({
+          ...row,
+          cardId: cardRecord.id,
+        });
+
+        for (const setId of setIds) {
+          const current = setAccuracyStats.get(setId) ?? { attempts: 0, correct: 0 };
+          current.attempts += row.attemptCount;
+          current.correct += row.correctCount;
+          setAccuracyStats.set(setId, current);
+        }
+      }
+
+      const answersSessionId = store.nextIds.quizSession++;
+      store.quizSessions.push({
+        id: answersSessionId,
+        started_at: nowIso(),
+        score: 0,
+        total: 0,
+        selected_set_ids: '[]',
+      });
+
+      for (const row of importedCards) {
+        for (let index = 0; index < row.correctCount; index += 1) {
+          store.quizAnswers.push({
+            id: store.nextIds.quizAnswer++,
+            quiz_session_id: answersSessionId,
+            card_id: row.cardId,
+            chosen_back: row.back,
+            is_correct: 1,
+          });
+        }
+
+        for (let index = 0; index < row.incorrectCount; index += 1) {
+          store.quizAnswers.push({
+            id: store.nextIds.quizAnswer++,
+            quiz_session_id: answersSessionId,
+            card_id: row.cardId,
+            chosen_back: '__imported_incorrect__',
+            is_correct: 0,
+          });
+        }
+
+        store.cardProgress.push({
+          card_id: row.cardId,
+          last_reviewed_at: row.lastReviewedAt || null,
+          next_due_at: row.nextDueAt || null,
+          correct_streak: row.correctStreak,
+          interval_days: row.intervalDays,
+        });
+      }
+
+      for (const [setId, stats] of setAccuracyStats.entries()) {
+        if (!stats.attempts) {
+          continue;
+        }
+
+        store.quizSessions.push({
+          id: store.nextIds.quizSession++,
+          started_at: nowIso(),
+          score: Math.round((stats.correct / stats.attempts) * 100),
+          total: 100,
+          selected_set_ids: JSON.stringify([setId]),
+        });
+      }
+
       writeWebStore(store);
     },
 
@@ -504,6 +772,64 @@ function buildDistractorBiasMap(rows) {
     map[cardId][row.chosen_back] = Number(row.wrong_count) || 0;
     return map;
   }, {});
+}
+
+function buildExportRows(rows) {
+  return rows.map((row) => {
+    const attempts = Number(row.attempt_count) || 0;
+    const correct = Number(row.correct_count) || 0;
+    const accuracyPercent = attempts > 0 ? Math.round((correct / attempts) * 100) : '';
+
+    return {
+      front: row.front,
+      type: row.type,
+      back: row.back,
+      sets: row.sets || '',
+      attempt_count: attempts,
+      correct_count: correct,
+      accuracy_percent: accuracyPercent,
+      last_reviewed_at: row.last_reviewed_at || '',
+      next_due_at: row.next_due_at || '',
+      correct_streak: Number(row.correct_streak) || 0,
+      interval_days: Number(row.interval_days) || 0,
+    };
+  });
+}
+
+function buildExportRowsFromStore(store) {
+  const statsByCardId = getAnswerStatsByCardId(store.quizAnswers);
+  const progressByCardId = new Map(store.cardProgress.map((item) => [item.card_id, item]));
+  const setNamesById = new Map(store.sets.map((set) => [set.id, set.name]));
+  const setNamesByCardId = new Map();
+
+  for (const relation of store.setCards) {
+    const current = setNamesByCardId.get(relation.card_id) ?? [];
+    const setName = setNamesById.get(relation.set_id);
+    if (setName && !current.includes(setName)) {
+      current.push(setName);
+    }
+    setNamesByCardId.set(relation.card_id, current);
+  }
+
+  return [...store.cards]
+    .map((card) => {
+      const stats = statsByCardId.get(card.id) ?? { attempt_count: 0, correct_count: 0 };
+      const progress = progressByCardId.get(card.id) ?? {};
+
+      return {
+        front: card.front,
+        type: card.type,
+        back: card.back,
+        sets: (setNamesByCardId.get(card.id) ?? []).sort((left, right) => left.localeCompare(right)).join(' | '),
+        attempt_count: stats.attempt_count,
+        correct_count: stats.correct_count,
+        last_reviewed_at: progress.last_reviewed_at ?? '',
+        next_due_at: progress.next_due_at ?? '',
+        correct_streak: Number(progress.correct_streak) || 0,
+        interval_days: Number(progress.interval_days) || 0,
+      };
+    })
+    .sort((left, right) => left.front.localeCompare(right.front));
 }
 
 function formatCardBack(type, back) {
