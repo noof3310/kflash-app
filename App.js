@@ -103,8 +103,6 @@ function AppShell({ storage }) {
   const [answers, setAnswers] = useState([]);
   const [quizFeedback, setQuizFeedback] = useState(null);
   const [importing, setImporting] = useState(false);
-  const [showCreateSetModal, setShowCreateSetModal] = useState(false);
-  const [newSetName, setNewSetName] = useState('');
   const [setSearchQuery, setSetSearchQuery] = useState('');
   const [setFilter, setSetFilter] = useState('all');
   const [setSort, setSetSort] = useState('priority');
@@ -533,23 +531,6 @@ function AppShell({ storage }) {
     }
   };
 
-  const handleCreateSet = async () => {
-    const name = newSetName.trim();
-    if (!name) {
-      showAlert('Set name needed', 'Type a set name first.');
-      return;
-    }
-
-    try {
-      await storage.createSet(name);
-      setNewSetName('');
-      setShowCreateSetModal(false);
-      await refreshAll();
-    } catch (error) {
-      showAlert('Could not create set', 'That set name probably already exists. Tiny gremlin behavior.');
-    }
-  };
-
   const toggleSetSelection = (setId) => {
     setSelectedSetIds((prev) =>
       prev.includes(setId) ? prev.filter((id) => id !== setId) : [...prev, setId]
@@ -630,8 +611,6 @@ function AppShell({ storage }) {
           setQuizIndex(0);
           setAnswers([]);
           setQuizFeedback(null);
-          setShowCreateSetModal(false);
-          setNewSetName('');
           setScreen('home');
           await refreshAll();
           showAlert('Data cleared', 'All flash card data has been removed.');
@@ -664,8 +643,6 @@ function AppShell({ storage }) {
           setQuizIndex(0);
           setAnswers([]);
           setQuizFeedback(null);
-          setShowCreateSetModal(false);
-          setNewSetName('');
           setTheme(DEFAULT_THEME);
           setTtsRate(DEFAULT_TTS_RATE);
           setTtsPitch(DEFAULT_TTS_PITCH);
@@ -1137,9 +1114,6 @@ function AppShell({ storage }) {
         <Pressable style={[styles.primaryButton, { backgroundColor: colors.primaryButton }]} onPress={handleImportCsv} disabled={importing}>
           <Text style={[styles.primaryButtonText, { color: colors.primaryButtonText }]}>{importing ? 'Importing...' : 'Import CSV'}</Text>
         </Pressable>
-        <Pressable style={[styles.secondaryButton, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={() => setShowCreateSetModal(true)}>
-          <Text style={[styles.secondaryButtonText, { color: colors.primaryText }]}>New Set</Text>
-        </Pressable>
       </View>
 
       <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -1389,37 +1363,6 @@ function AppShell({ storage }) {
           </Text>
         ) : null}
       </View>
-
-      <Modal visible={showCreateSetModal} transparent animationType="slide" onRequestClose={() => setShowCreateSetModal(false)}>
-        <View style={[styles.modalBackdrop, { backgroundColor: colors.modalBackdrop }]}>
-          <View style={[styles.modalCard, { backgroundColor: colors.surface }]}>
-            <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>Create set</Text>
-            <TextInput
-              value={newSetName}
-              onChangeText={setNewSetName}
-              placeholder="Set name"
-              placeholderTextColor={colors.secondaryText}
-              style={[
-                styles.input,
-                {
-                  borderColor: colors.border,
-                  backgroundColor: colors.inputBackground,
-                  color: colors.primaryText,
-                },
-              ]}
-              autoCapitalize="words"
-            />
-            <View style={styles.actionsRow}>
-              <Pressable style={[styles.secondaryButton, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={() => setShowCreateSetModal(false)}>
-                <Text style={[styles.secondaryButtonText, { color: colors.primaryText }]}>Cancel</Text>
-              </Pressable>
-              <Pressable style={[styles.primaryButton, { backgroundColor: colors.primaryButton }]} onPress={handleCreateSet}>
-                <Text style={[styles.primaryButtonText, { color: colors.primaryButtonText }]}>Save</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
     </AnimatedScrollView>
 
       <Animated.View style={[styles.stickyFooter, animatedFooterStyle, { backgroundColor: colors.stickySurface, borderColor: colors.border }]}>
