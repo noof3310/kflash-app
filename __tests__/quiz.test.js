@@ -1,4 +1,5 @@
 import {
+  buildAdaptiveQuizItem,
   buildLiveReviewCards,
   getCardDifficulty,
   getProgressiveLearningWeight,
@@ -115,7 +116,8 @@ describe('quiz helpers', () => {
   test('difficulty thresholds match current quiz rules', () => {
     expect(getCardDifficulty({ attempt_count: 0, correct_count: 0 })).toBe('easy');
     expect(getCardDifficulty({ attempt_count: 10, correct_count: 6 })).toBe('normal');
-    expect(getCardDifficulty({ attempt_count: 10, correct_count: 9 })).toBe('hard');
+    expect(getCardDifficulty({ attempt_count: 10, correct_count: 8 })).toBe('hard');
+    expect(getCardDifficulty({ attempt_count: 10, correct_count: 10 })).toBe('perfection');
   });
 
   test('distractor soft bias can pull previously missed wrong choices higher', () => {
@@ -140,5 +142,31 @@ describe('quiz helpers', () => {
     }
 
     expect(counts['(v.) กิน']).toBeGreaterThan(counts['(v.) มา']);
+  });
+
+  test('back-to-front mode prompts with back text and answers with fronts', () => {
+    const quizItem = buildAdaptiveQuizItem(
+      [
+        { id: 1, front: '가다', back: '(v.) ไป', type: 'v.', attempt_count: 10, correct_count: 8 },
+        { id: 2, front: '오다', back: '(v.) มา', type: 'v.', attempt_count: 1, correct_count: 0 },
+        { id: 3, front: '먹다', back: '(v.) กิน', type: 'v.', attempt_count: 1, correct_count: 0 },
+        { id: 4, front: '보다', back: '(v.) ดู', type: 'v.', attempt_count: 1, correct_count: 0 },
+      ],
+      [
+        { id: 1, front: '가다', back: '(v.) ไป', type: 'v.', attempt_count: 10, correct_count: 8 },
+        { id: 2, front: '오다', back: '(v.) มา', type: 'v.', attempt_count: 1, correct_count: 0 },
+        { id: 3, front: '먹다', back: '(v.) กิน', type: 'v.', attempt_count: 1, correct_count: 0 },
+        { id: 4, front: '보다', back: '(v.) ดู', type: 'v.', attempt_count: 1, correct_count: 0 },
+      ],
+      [],
+      0,
+      "I don't know the answer",
+      {},
+      'back-to-front'
+    );
+
+    expect(quizItem.promptField).toBe('back');
+    expect(quizItem.answerField).toBe('front');
+    expect(quizItem.options).toContain(quizItem.correctOption);
   });
 });

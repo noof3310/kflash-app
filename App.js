@@ -51,6 +51,10 @@ const QUIZ_DONT_KNOW_OPTION = "I don't know the answer";
 const HOME_SET_PREVIEW_COUNT = 8;
 const SET_FILTER_OPTIONS = ['all', 'selected', 'unplayed', 'weak', 'strong'];
 const SET_SORT_OPTIONS = ['priority', 'name', 'lowest score', 'highest score', 'most cards'];
+const QUIZ_DIRECTION_OPTIONS = [
+  { value: 'front-to-back', label: 'Front -> Back' },
+  { value: 'back-to-front', label: 'Back -> Front' },
+];
 const CORRECT_SOUND = require('./assets/sounds/correct.wav');
 const WRONG_SOUND = require('./assets/sounds/wrong.wav');
 const AnimatedScrollView = Animated.createAnimatedComponent(ScrollView);
@@ -98,6 +102,7 @@ function AppShell({ storage }) {
   const [quizSize, setQuizSize] = useState(10);
   const [quizSizeInput, setQuizSizeInput] = useState('10');
   const [quizTargetCount, setQuizTargetCount] = useState(0);
+  const [quizDirectionMode, setQuizDirectionMode] = useState('front-to-back');
   const [quizItems, setQuizItems] = useState([]);
   const [quizIndex, setQuizIndex] = useState(0);
   const [answers, setAnswers] = useState([]);
@@ -278,7 +283,7 @@ function AppShell({ storage }) {
       return {
         ...answer,
         id: answer.cardId,
-        back: answer.correctBack,
+        back: answer.back,
         attempt_count: Number(liveCard?.attempt_count) || 0,
         correct_count: Number(liveCard?.correct_count) || 0,
         last_reviewed_at: liveCard?.last_reviewed_at ?? null,
@@ -342,10 +347,37 @@ function AppShell({ storage }) {
   const animatedHeroStyle = {
     transform: [{ translateY: heroFloat }],
   };
+  const isFrontToBackEnabled =
+    quizDirectionMode === 'front-to-back' || quizDirectionMode === 'mixed';
+  const isBackToFrontEnabled =
+    quizDirectionMode === 'back-to-front' || quizDirectionMode === 'mixed';
 
   useEffect(() => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
   }, [answers.length, filteredSets.length, quizFeedback, reviewCards.length, selectedSetIds.length, showAllSets]);
+
+  const toggleQuizDirection = useCallback((direction) => {
+    setQuizDirectionMode((currentMode) => {
+      const nextFrontToBackEnabled =
+        direction === 'front-to-back' ? !isModeEnabled(currentMode, 'front-to-back') : isModeEnabled(currentMode, 'front-to-back');
+      const nextBackToFrontEnabled =
+        direction === 'back-to-front' ? !isModeEnabled(currentMode, 'back-to-front') : isModeEnabled(currentMode, 'back-to-front');
+
+      if (nextFrontToBackEnabled && nextBackToFrontEnabled) {
+        return 'mixed';
+      }
+
+      if (nextFrontToBackEnabled) {
+        return 'front-to-back';
+      }
+
+      if (nextBackToFrontEnabled) {
+        return 'back-to-front';
+      }
+
+      return currentMode;
+    });
+  }, []);
 
   const startQuiz = useCallback(async () => {
     const rawRows = reviewCards;
@@ -370,7 +402,8 @@ function AppShell({ storage }) {
       [],
       0,
       QUIZ_DONT_KNOW_OPTION,
-      distractorBiasMap
+      distractorBiasMap,
+      quizDirectionMode
     );
 
     setQuizTargetCount(requestedSize);
@@ -382,30 +415,33 @@ function AppShell({ storage }) {
       clearTimeout(feedbackTimeoutRef.current);
     }
     setScreen('quiz');
-  }, [cards, distractorBiasMap, quizSizeInput, reviewCards]);
+  }, [cards, distractorBiasMap, quizDirectionMode, quizSizeInput, reviewCards]);
 
   const currentItem = quizItems[quizIndex];
   const progressText = quizTargetCount ? `${Math.min(quizIndex + 1, quizTargetCount)} / ${quizTargetCount}` : '0 / 0';
 
   useEffect(() => {
-    if (screen === 'quiz' && currentItem?.front) {
-      speakFrontText(currentItem.front);
+    if (screen === 'quiz' && currentItem?.promptText && currentItem?.promptField === 'front') {
+      speakFrontText(currentItem.promptText);
     }
-  }, [currentItem?.front, screen, ttsPitch, ttsRate]);
+  }, [currentItem?.promptField, currentItem?.promptText, screen, ttsPitch, ttsRate]);
 
   const handleAnswer = async (option) => {
     if (!currentItem || quizFeedback) {
       return;
     }
 
-    const isCorrect = option === currentItem.back;
+    const isCorrect = option === currentItem.correctOption;
     const nextAnswers = [
       ...answers,
       {
         quizItemInstanceId: currentItem.instanceId,
         cardId: currentItem.id,
         front: currentItem.front,
-        correctBack: currentItem.back,
+        back: currentItem.back,
+        promptText: currentItem.promptText,
+        promptField: currentItem.promptField,
+        correctOption: currentItem.correctOption,
         chosenBack: option,
         isCorrect,
       },
@@ -415,7 +451,7 @@ function AppShell({ storage }) {
     setQuizFeedback({
       chosenBack: option,
       isCorrect,
-      correctBack: currentItem.back,
+      correctOption: currentItem.correctOption,
     });
     requestAnimationFrame(() => {
       playFeedbackSound(isCorrect).catch(() => {});
@@ -432,7 +468,8 @@ function AppShell({ storage }) {
             nextAnswers,
             quizIndex + 1,
             QUIZ_DONT_KNOW_OPTION,
-            distractorBiasMap
+            distractorBiasMap,
+            quizDirectionMode
           );
           if (nextQuizItem) {
             setQuizItems((prev) => [...prev, nextQuizItem]);
@@ -896,6 +933,37 @@ function AppShell({ storage }) {
           </View>
 
           <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>Quiz direction</Text>
+            <View style={styles.filterRow}>
+              {QUIZ_DIRECTION_OPTIONS.map((option) => {
+                const active = isModeEnabled(quizDirectionMode, option.value);
+                return (
+                  <Pressable
+                    key={option.value}
+                    style={[
+                      styles.filterChip,
+                      { backgroundColor: colors.softSurface, borderColor: colors.border },
+                      active && { backgroundColor: colors.primaryText, borderColor: colors.primaryText },
+                    ]}
+                    onPress={() => toggleQuizDirection(option.value)}
+                  >
+                    <Text style={[styles.filterChipText, { color: active ? colors.surface : colors.primaryText }]}>
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
+              {isFrontToBackEnabled && isBackToFrontEnabled
+                ? 'Both directions selected'
+                : isFrontToBackEnabled
+                  ? 'Front -> Back only'
+                  : 'Back -> Front only'}
+            </Text>
+          </View>
+
+          <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>Cards in selected sets</Text>
             {prioritizedReviewCards.map((item) => (
               <View
@@ -955,16 +1023,30 @@ function AppShell({ storage }) {
           </View>
 
           <View style={[styles.quizCard, styles.quizCardCompact, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Text style={[styles.quizLabel, { color: colors.secondaryText }]}>What matches this card?</Text>
-            <Text style={[styles.frontText, { color: colors.primaryText }]}>{currentItem.front}</Text>
-            <Pressable style={[styles.listenMiniButton, { backgroundColor: colors.softAccent }]} onPress={() => speakFrontText(currentItem.front)}>
-              <Text style={styles.listenMiniText}>🔊</Text>
-            </Pressable>
+            <Text style={[styles.quizLabel, { color: colors.secondaryText }]}>
+              {currentItem.promptField === 'front' ? 'What matches this card?' : 'Which word matches this meaning?'}
+            </Text>
+            <Text
+              numberOfLines={2}
+              adjustsFontSizeToFit
+              minimumFontScale={0.7}
+              style={[styles.frontText, { color: colors.primaryText }]}
+            >
+              {currentItem.promptText}
+            </Text>
+            {currentItem.promptField === 'front' ? (
+              <Pressable
+                style={[styles.listenMiniButton, { backgroundColor: colors.softAccent }]}
+                onPress={() => speakFrontText(currentItem.promptText)}
+              >
+                <Text style={styles.listenMiniText}>🔊</Text>
+              </Pressable>
+            ) : null}
           </View>
 
           <ScrollView
             style={styles.quizOptionsScroll}
-            contentContainerStyle={styles.optionsContainer}
+            contentContainerStyle={[styles.optionsContainer, styles.optionsContainerCompact]}
             showsVerticalScrollIndicator={false}
           >
             {currentItem.options.map((option, optionIndex) => (
@@ -972,20 +1054,44 @@ function AppShell({ storage }) {
                 key={`${currentItem.instanceId}-${optionIndex}-${option}`}
                 style={[
                   styles.optionButton,
+                  styles.optionButtonCompact,
                   { backgroundColor: colors.surface, borderColor: colors.border },
                   quizFeedback?.chosenBack === option &&
                     (quizFeedback.isCorrect
                       ? { backgroundColor: colors.correctBackground, borderColor: colors.correctBorder }
                       : { backgroundColor: colors.errorBackground, borderColor: colors.errorBorder }),
                   !quizFeedback?.isCorrect &&
-                    quizFeedback?.correctBack === option && {
+                    quizFeedback?.correctOption === option && {
                       backgroundColor: colors.correctBackground,
                       borderColor: colors.correctBorder,
                     },
                 ]}
                 onPress={() => handleAnswer(option)}
               >
-                <Text style={[styles.optionText, { color: colors.primaryText }]}>{option}</Text>
+                <View style={styles.optionContentRow}>
+                  <Text
+                    numberOfLines={2}
+                    style={[
+                      styles.optionText,
+                      styles.optionTextCompact,
+                      styles.optionTextWrap,
+                      { color: colors.primaryText },
+                    ]}
+                  >
+                    {option}
+                  </Text>
+                  {currentItem.promptField === 'back' && option !== QUIZ_DONT_KNOW_OPTION ? (
+                    <Pressable
+                      style={[styles.optionSoundButton, { backgroundColor: colors.softAccent, borderColor: colors.border }]}
+                      onPress={(event) => {
+                        event?.stopPropagation?.();
+                        speakFrontText(option);
+                      }}
+                    >
+                      <Text style={styles.optionSoundText}>🔊</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
               </Pressable>
             ))}
           </ScrollView>
@@ -1005,7 +1111,7 @@ function AppShell({ storage }) {
             >
               <Text style={[styles.feedbackTitle, { color: colors.errorText }]}>Incorrect</Text>
               <Text style={[styles.feedbackDetail, { color: colors.primaryText }]}>
-                Correct answer: {quizFeedback.correctBack}
+                Correct answer: {quizFeedback.correctOption}
               </Text>
               <Pressable
                 style={[styles.feedbackConfirmButton, { backgroundColor: colors.primaryButton }]}
@@ -1016,7 +1122,10 @@ function AppShell({ storage }) {
                       quizItemInstanceId: currentItem.instanceId,
                       cardId: currentItem.id,
                       front: currentItem.front,
-                      correctBack: currentItem.back,
+                      back: currentItem.back,
+                      promptText: currentItem.promptText,
+                      promptField: currentItem.promptField,
+                      correctOption: currentItem.correctOption,
                       chosenBack: quizFeedback.chosenBack,
                       isCorrect: false,
                     },
@@ -1031,7 +1140,8 @@ function AppShell({ storage }) {
                       finalAnswers,
                       quizIndex + 1,
                       QUIZ_DONT_KNOW_OPTION,
-                      distractorBiasMap
+                      distractorBiasMap,
+                      quizDirectionMode
                     );
                     if (nextQuizItem) {
                       setQuizItems((prev) => [...prev, nextQuizItem]);
@@ -1099,7 +1209,7 @@ function AppShell({ storage }) {
                 ]}
               >
                 <View style={{ flex: 1 }}>
-                  <Text style={[styles.resultWord, { color: colors.primaryText }]}>{item.front}</Text>
+                  <Text style={[styles.resultWord, { color: colors.primaryText }]}>{item.promptText}</Text>
                   <Text
                     style={[
                       styles.resultStatus,
@@ -1109,7 +1219,7 @@ function AppShell({ storage }) {
                     {item.isCorrect ? 'Correct' : 'Incorrect'}
                   </Text>
                   <Text style={[styles.resultDetail, { color: colors.secondaryText }]}>
-                    {item.correctBack}
+                    {item.correctOption}
                   </Text>
                   {formatReviewStats(item) ? (
                     <Text style={[styles.reviewStatText, { color: colors.secondaryText }]}>
@@ -1542,6 +1652,10 @@ function downloadCsvOnWeb(filename, csvText) {
   link.click();
   document.body.removeChild(link);
   window.URL.revokeObjectURL(url);
+}
+
+function isModeEnabled(mode, targetDirection) {
+  return mode === 'mixed' || mode === targetDirection;
 }
 
 function normalizeImportedLearningProgressRows(rawRows) {
@@ -2047,19 +2161,24 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   quizCardCompact: {
-    paddingVertical: 18,
-    paddingHorizontal: 20,
-    gap: 8,
-    marginBottom: 10,
+    width: '100%',
+    minHeight: 136,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    gap: 5,
+    marginBottom: 6,
+    justifyContent: 'center',
   },
   quizLabel: {
     color: '#64748b',
-    fontSize: 15,
+    fontSize: 13,
   },
   frontText: {
-    fontSize: 34,
+    fontSize: 28,
+    lineHeight: 34,
     fontWeight: '800',
     color: '#172033',
+    textAlign: 'center',
   },
   speakButton: {
     backgroundColor: '#eef2ff',
@@ -2072,8 +2191,12 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   optionsContainer: {
-    gap: 12,
-    paddingBottom: 12,
+    gap: 8,
+    paddingBottom: 0,
+  },
+  optionsContainerCompact: {
+    justifyContent: 'flex-start',
+    flexGrow: 0,
   },
   quizOptionsScroll: {
     flex: 1,
@@ -2083,18 +2206,50 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 1,
     borderColor: '#dbe3f1',
-    paddingVertical: 17,
-    paddingHorizontal: 16,
+    minHeight: 46,
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+    justifyContent: 'center',
     shadowColor: '#0f172a',
     shadowOpacity: 0.03,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
     elevation: 1,
   },
+  optionButtonCompact: {
+    minHeight: 64,
+    paddingVertical: 18,
+    paddingHorizontal: 12,
+  },
+  optionContentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   optionText: {
-    fontSize: 16,
+    fontSize: 17,
+    lineHeight: 22,
     color: '#1f2a44',
     fontWeight: '600',
+  },
+  optionTextCompact: {
+    fontSize: 20,
+    lineHeight: 24,
+  },
+  optionTextWrap: {
+    flex: 1,
+  },
+  optionSoundButton: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  optionSoundText: {
+    fontSize: 12,
   },
   scoreText: {
     fontSize: 22,

@@ -67,7 +67,8 @@ export function buildAdaptiveQuizItem(
   answers,
   questionIndex,
   dontKnowOption,
-  distractorBiasMap = {}
+  distractorBiasMap = {},
+  quizDirectionMode = 'front-to-back'
 ) {
   const liveCards = buildLiveReviewCards(reviewCards, answers);
   const lastAnsweredCardId = answers?.length ? answers[answers.length - 1].cardId : null;
@@ -81,12 +82,20 @@ export function buildAdaptiveQuizItem(
     return null;
   }
 
+  const config = getQuestionConfig(question, quizDirectionMode);
+  const promptText = getQuestionText(question, config.promptField);
+  const correctOption = getQuestionText(question, config.answerField);
+
   return {
     id: question.id,
     instanceId: `${question.id}-${questionIndex}-${Math.random().toString(36).slice(2, 8)}`,
     front: question.front,
     back: question.back,
-    options: buildQuizOptions(question, liveCards, allCards, dontKnowOption, distractorBiasMap),
+    promptText,
+    promptField: config.promptField,
+    correctOption,
+    answerField: config.answerField,
+    options: buildQuizOptions(question, liveCards, allCards, dontKnowOption, distractorBiasMap, config),
   };
 }
 
@@ -114,26 +123,36 @@ export function buildLiveReviewCards(reviewCards, answers) {
   return Array.from(cardMap.values());
 }
 
-export function buildQuizOptions(question, reviewCards, allCards, dontKnowOption, distractorBiasMap = {}) {
-  const difficulty = getCardDifficulty(question);
-  const totalChoices = difficulty === 'hard' ? 7 : 5;
-  const distractorCount = totalChoices - 2;
-  const optionSource = difficulty === 'easy' ? reviewCards : allCards;
-  const distractors = pickDistractorBacks(
+export function buildQuizOptions(
+  question,
+  reviewCards,
+  allCards,
+  dontKnowOption,
+  distractorBiasMap = {},
+  questionConfig = getQuestionConfig(question, 'front-to-back')
+) {
+  const distractorCount = questionConfig.totalChoices - 2;
+  const optionSource = questionConfig.optionSource === 'review' ? reviewCards : allCards;
+  const distractors = pickDistractorOptions(
     question,
     optionSource,
+    questionConfig.answerField,
     distractorCount,
-    difficulty !== 'easy',
+    questionConfig.preferSameType,
     distractorBiasMap
   );
 
-  return [dontKnowOption, ...shuffleArray([question.back, ...distractors])];
+  return [dontKnowOption, ...shuffleArray([getQuestionText(question, questionConfig.answerField), ...distractors])];
 }
 
 export function getCardDifficulty(card) {
   const { accuracy } = getStudyPriorityMetrics(card);
 
-  if (accuracy > 0.8) {
+  if (accuracy > 0.9) {
+    return 'perfection';
+  }
+
+  if (accuracy > 0.7) {
     return 'hard';
   }
 
@@ -151,17 +170,41 @@ export function pickDistractorBacks(
   preferSameType,
   distractorBiasMap = {}
 ) {
+  return pickDistractorOptions(
+    question,
+    sourceCards,
+    'back',
+    distractorCount,
+    preferSameType,
+    distractorBiasMap
+  );
+}
+
+function pickDistractorOptions(
+  question,
+  sourceCards,
+  answerField,
+  distractorCount,
+  preferSameType,
+  distractorBiasMap = {}
+) {
   const uniqueOptions = [];
-  const seenBacks = new Set([question.back]);
+  const seenOptions = new Set([getQuestionText(question, answerField)]);
   const candidateCards = shuffleArray(sourceCards ?? []).filter((card) => card.id !== question.id);
   const questionBiasMap = distractorBiasMap?.[question.id] ?? {};
 
   while (candidateCards.length > 0 && uniqueOptions.length < distractorCount) {
     const weightedCandidates = candidateCards
-      .filter((card) => !seenBacks.has(card.back))
+      .filter((card) => !seenOptions.has(getQuestionText(card, answerField)))
       .map((card) => ({
         card,
-        weight: getDistractorWeight(card, question, preferSameType, questionBiasMap),
+        weight: getDistractorWeight(
+          card,
+          question,
+          answerField,
+          preferSameType,
+          questionBiasMap
+        ),
       }));
 
     if (!weightedCandidates.length) {
@@ -173,16 +216,17 @@ export function pickDistractorBacks(
       break;
     }
 
-    seenBacks.add(pickedCard.back);
-    uniqueOptions.push(pickedCard.back);
+    const optionText = getQuestionText(pickedCard, answerField);
+    seenOptions.add(optionText);
+    uniqueOptions.push(optionText);
   }
 
   return uniqueOptions;
 }
 
-function getDistractorWeight(card, question, preferSameType, questionBiasMap) {
+function getDistractorWeight(card, question, answerField, preferSameType, questionBiasMap) {
   const sameTypeWeight = preferSameType && question.type && card.type === question.type ? 4 : 1;
-  const wrongCount = Number(questionBiasMap?.[card.back]) || 0;
+  const wrongCount = Number(questionBiasMap?.[getQuestionText(card, answerField)]) || 0;
   const softBiasBonus = Math.min(3, wrongCount) * 0.75;
 
   return sameTypeWeight + softBiasBonus;
@@ -284,4 +328,84 @@ function getNextIntervalDays(streak, previousIntervalDays) {
   }
 
   return Math.min(60, Math.max(14, previousIntervalDays * 2));
+}
+
+function getQuestionConfig(card, quizDirectionMode) {
+  const difficulty = getCardDifficulty(card);
+
+  if (quizDirectionMode === 'back-to-front') {
+    return getBackToFrontConfig(difficulty);
+  }
+
+  if (quizDirectionMode === 'mixed') {
+    return getMixedConfig(difficulty);
+  }
+
+  return getFrontToBackConfig(difficulty);
+}
+
+function getFrontToBackConfig(difficulty) {
+  if (difficulty === 'easy') {
+    return {
+      promptField: 'front',
+      answerField: 'back',
+      optionSource: 'review',
+      preferSameType: false,
+      totalChoices: 5,
+    };
+  }
+
+  return {
+    promptField: 'front',
+    answerField: 'back',
+    optionSource: 'all',
+    preferSameType: true,
+    totalChoices: difficulty === 'normal' ? 5 : 7,
+  };
+}
+
+function getBackToFrontConfig(difficulty) {
+  if (difficulty === 'easy' || difficulty === 'normal') {
+    return {
+      promptField: 'back',
+      answerField: 'front',
+      optionSource: 'review',
+      preferSameType: false,
+      totalChoices: 5,
+    };
+  }
+
+  return {
+    promptField: 'back',
+    answerField: 'front',
+    optionSource: 'all',
+    preferSameType: true,
+    totalChoices: difficulty === 'hard' ? 5 : 7,
+  };
+}
+
+function getMixedConfig(difficulty) {
+  if (difficulty === 'easy') {
+    return getFrontToBackConfig('easy');
+  }
+
+  if (difficulty === 'normal') {
+    return Math.random() < 0.5
+      ? getFrontToBackConfig('normal')
+      : getBackToFrontConfig('normal');
+  }
+
+  if (difficulty === 'hard') {
+    return Math.random() < 0.5
+      ? getFrontToBackConfig('hard')
+      : getBackToFrontConfig('hard');
+  }
+
+  return Math.random() < 0.5
+    ? getFrontToBackConfig('perfection')
+    : getBackToFrontConfig('perfection');
+}
+
+function getQuestionText(card, field) {
+  return field === 'front' ? card.front : card.back;
 }
