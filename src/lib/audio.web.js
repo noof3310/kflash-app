@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
 
-const FEEDBACK_GAIN = 2.5;
+const FEEDBACK_GAIN = 5;
 
 export async function setAudioModeAsync() {}
 
