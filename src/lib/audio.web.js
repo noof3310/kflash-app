@@ -16,6 +16,9 @@ export function useAudioPlayer(source) {
 
     const nextAudio = new Audio(uri);
     nextAudio.preload = 'auto';
+    nextAudio.volume = 1;
+    nextAudio.defaultMuted = false;
+    nextAudio.muted = false;
     return nextAudio;
   }, [source]);
 
@@ -37,6 +40,7 @@ export function useAudioPlayer(source) {
           return;
         }
 
+        audio.volume = 1;
         await audio.play();
       },
       pause() {

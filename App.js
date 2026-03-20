@@ -112,6 +112,7 @@ function AppShell({ storage }) {
   const [ttsRate, setTtsRate] = useState(DEFAULT_TTS_RATE);
   const [ttsPitch, setTtsPitch] = useState(DEFAULT_TTS_PITCH);
   const [theme, setTheme] = useState(DEFAULT_THEME);
+  const [reviewScreenKey, setReviewScreenKey] = useState(0);
   const feedbackTimeoutRef = useRef(null);
   const feedbackSoundRequestRef = useRef(0);
   const reviewScrollRef = useRef(null);
@@ -475,6 +476,7 @@ function AppShell({ storage }) {
 
     setReviewCards(rows);
     setDistractorBiasMap(nextDistractorBiasMap);
+    setReviewScreenKey((prev) => prev + 1);
     setScreen('review');
   }, [loadDistractorBiasMap, loadSelectedCards, selectedSetIds.length]);
 
@@ -575,7 +577,9 @@ function AppShell({ storage }) {
       correctPlayer.pause();
       wrongPlayer.pause();
 
-      await wait(40);
+      if (Platform.OS !== 'web') {
+        await wait(40);
+      }
       if (feedbackSoundRequestRef.current !== requestId) {
         return;
       }
@@ -733,6 +737,7 @@ function AppShell({ storage }) {
     setQuizFeedback(null);
     setDistractorBiasMap(nextDistractorBiasMap);
     setReviewCards(rows ?? []);
+    setReviewScreenKey((prev) => prev + 1);
     setScreen('review');
   }, [loadDistractorBiasMap, loadSelectedCards, refreshAll, selectedSetIds.length]);
 
@@ -741,11 +746,13 @@ function AppShell({ storage }) {
       <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.screenBackground }]}>
         <StatusBar style={statusBarStyle} />
         <AnimatedScrollView
+          key={`review-${reviewScreenKey}`}
           ref={reviewScrollRef}
           style={animatedScreenStyle}
           contentContainerStyle={[styles.container, styles.containerWithFooter]}
           showsVerticalScrollIndicator={false}
           onContentSizeChange={scrollReviewToTop}
+          contentOffset={{ x: 0, y: 0 }}
         >
           <View style={styles.quizHeaderRow}>
             <Pressable
