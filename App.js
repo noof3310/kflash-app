@@ -353,7 +353,7 @@ function AppShell({ storage }) {
     const rawRows = reviewCards;
 
     if (!rawRows || rawRows.length < 4) {
-      Alert.alert(
+      showAlert(
         'Not enough cards',
         'You need at least 4 unique cards across the selected sets for multiple choice.'
       );
@@ -362,7 +362,7 @@ function AppShell({ storage }) {
 
     const requestedSize = Number.parseInt(quizSizeInput, 10);
     if (!Number.isFinite(requestedSize) || requestedSize <= 0) {
-      Alert.alert('Invalid quiz size', 'Enter a number greater than 0.');
+      showAlert('Invalid quiz size', 'Enter a number greater than 0.');
       return;
     }
 
@@ -461,7 +461,7 @@ function AppShell({ storage }) {
 
   const openReviewScreen = useCallback(async () => {
     if (selectedSetIds.length === 0) {
-      Alert.alert('Choose at least one set', 'Pick one or more sets before continuing.');
+      showAlert('Choose at least one set', 'Pick one or more sets before continuing.');
       return;
     }
 
@@ -470,7 +470,7 @@ function AppShell({ storage }) {
       loadDistractorBiasMap(),
     ]);
     if (!rows?.length) {
-      Alert.alert('No cards found', 'The selected sets do not contain any cards yet.');
+      showAlert('No cards found', 'The selected sets do not contain any cards yet.');
       return;
     }
 
@@ -525,9 +525,9 @@ function AppShell({ storage }) {
       await storage.importCsvRows(rows);
 
       await refreshAll();
-      Alert.alert('Import complete', `Loaded ${rows.length} cards from CSV.`);
+      showAlert('Import complete', `Loaded ${rows.length} cards from CSV.`);
     } catch (error) {
-      Alert.alert('Import failed', error?.message ?? 'Something went sideways while importing.');
+      showAlert('Import failed', error?.message ?? 'Something went sideways while importing.');
     } finally {
       setImporting(false);
     }
@@ -536,7 +536,7 @@ function AppShell({ storage }) {
   const handleCreateSet = async () => {
     const name = newSetName.trim();
     if (!name) {
-      Alert.alert('Set name needed', 'Type a set name first.');
+      showAlert('Set name needed', 'Type a set name first.');
       return;
     }
 
@@ -546,7 +546,7 @@ function AppShell({ storage }) {
       setShowCreateSetModal(false);
       await refreshAll();
     } catch (error) {
-      Alert.alert('Could not create set', 'That set name probably already exists. Tiny gremlin behavior.');
+      showAlert('Could not create set', 'That set name probably already exists. Tiny gremlin behavior.');
     }
   };
 
@@ -602,91 +602,81 @@ function AppShell({ storage }) {
       try {
         await storage.saveSetting(key, value);
       } catch (error) {
-        Alert.alert('Could not save setting', 'The speech setting could not be saved.');
+        showAlert('Could not save setting', 'The speech setting could not be saved.');
       }
     },
     [storage]
   );
 
   const clearAllData = useCallback(() => {
-    Alert.alert(
-      'Clear all data?',
-      'This will remove all sets, cards, and quiz history. Speech settings will be kept.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Clear everything',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              if (feedbackTimeoutRef.current) {
-                clearTimeout(feedbackTimeoutRef.current);
-              }
+    showConfirm({
+      title: 'Clear all data?',
+      message: 'This will remove all sets, cards, and quiz history. Speech settings will be kept.',
+      confirmText: 'Clear everything',
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          if (feedbackTimeoutRef.current) {
+            clearTimeout(feedbackTimeoutRef.current);
+          }
 
-              await storage.clearAllData();
+          await storage.clearAllData();
 
-              setSelectedSetIds([]);
-              setDistractorBiasMap({});
-              setReviewCards([]);
-              setQuizTargetCount(0);
-              setQuizItems([]);
-              setQuizIndex(0);
-              setAnswers([]);
-              setQuizFeedback(null);
-              setShowCreateSetModal(false);
-              setNewSetName('');
-              setScreen('home');
-              await refreshAll();
-              Alert.alert('Data cleared', 'All flash card data has been removed.');
-            } catch (error) {
-              Alert.alert('Could not clear data', 'Something went wrong while deleting your data.');
-            }
-          },
-        },
-      ]
-    );
+          setSelectedSetIds([]);
+          setDistractorBiasMap({});
+          setReviewCards([]);
+          setQuizTargetCount(0);
+          setQuizItems([]);
+          setQuizIndex(0);
+          setAnswers([]);
+          setQuizFeedback(null);
+          setShowCreateSetModal(false);
+          setNewSetName('');
+          setScreen('home');
+          await refreshAll();
+          showAlert('Data cleared', 'All flash card data has been removed.');
+        } catch (error) {
+          showAlert('Could not clear data', 'Something went wrong while deleting your data.');
+        }
+      },
+    });
   }, [refreshAll, storage]);
 
   const resetDatabaseSchema = useCallback(() => {
-    Alert.alert(
-      'Reset DB schema?',
-      'This will delete all data and rebuild the local database structure from scratch.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Reset schema',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              if (feedbackTimeoutRef.current) {
-                clearTimeout(feedbackTimeoutRef.current);
-              }
+    showConfirm({
+      title: 'Reset DB schema?',
+      message: 'This will delete all data and rebuild the local database structure from scratch.',
+      confirmText: 'Reset schema',
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          if (feedbackTimeoutRef.current) {
+            clearTimeout(feedbackTimeoutRef.current);
+          }
 
-              await storage.resetSchema();
+          await storage.resetSchema();
 
-              setSelectedSetIds([]);
-              setDistractorBiasMap({});
-              setReviewCards([]);
-              setQuizTargetCount(0);
-              setQuizItems([]);
-              setQuizIndex(0);
-              setAnswers([]);
-              setQuizFeedback(null);
-              setShowCreateSetModal(false);
-              setNewSetName('');
-              setTheme(DEFAULT_THEME);
-              setTtsRate(DEFAULT_TTS_RATE);
-              setTtsPitch(DEFAULT_TTS_PITCH);
-              setScreen('home');
-              await refreshAll();
-              Alert.alert('Schema reset', 'The local database has been rebuilt.');
-            } catch (error) {
-              Alert.alert('Could not reset schema', 'Something went wrong while rebuilding the database.');
-            }
-          },
-        },
-      ]
-    );
+          setSelectedSetIds([]);
+          setDistractorBiasMap({});
+          setReviewCards([]);
+          setQuizTargetCount(0);
+          setQuizItems([]);
+          setQuizIndex(0);
+          setAnswers([]);
+          setQuizFeedback(null);
+          setShowCreateSetModal(false);
+          setNewSetName('');
+          setTheme(DEFAULT_THEME);
+          setTtsRate(DEFAULT_TTS_RATE);
+          setTtsPitch(DEFAULT_TTS_PITCH);
+          setScreen('home');
+          await refreshAll();
+          showAlert('Schema reset', 'The local database has been rebuilt.');
+        } catch (error) {
+          showAlert('Could not reset schema', 'Something went wrong while rebuilding the database.');
+        }
+      },
+    });
   }, [refreshAll, storage]);
 
   const updateTheme = useCallback(
@@ -696,7 +686,7 @@ function AppShell({ storage }) {
       try {
         await storage.saveSetting('theme', nextTheme);
       } catch (error) {
-        Alert.alert('Could not save setting', 'The theme setting could not be saved.');
+        showAlert('Could not save setting', 'The theme setting could not be saved.');
       }
     },
     [storage]
@@ -1479,6 +1469,34 @@ function wait(ms) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+function showAlert(title, message) {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    window.alert([title, message].filter(Boolean).join('\n\n'));
+    return;
+  }
+
+  Alert.alert(title, message);
+}
+
+function showConfirm({ title, message, confirmText, destructive = false, onConfirm }) {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    const confirmed = window.confirm([title, message].filter(Boolean).join('\n\n'));
+    if (confirmed) {
+      onConfirm?.();
+    }
+    return;
+  }
+
+  Alert.alert(title, message, [
+    { text: 'Cancel', style: 'cancel' },
+    {
+      text: confirmText,
+      style: destructive ? 'destructive' : 'default',
+      onPress: onConfirm,
+    },
+  ]);
 }
 
 class AppErrorBoundary extends React.Component {
