@@ -42,6 +42,7 @@ import {
   getTtsProviderStatus,
   loadTtsBackendStatus,
   loadTtsVoices,
+  prefetchTts,
   speakWithTts,
   stopTtsPlayback,
   TTS_PROVIDER_OPTIONS,
@@ -672,6 +673,7 @@ function AppShell({ storage }) {
   }, [cards, distractorBiasMap, quizDirectionMode, quizSizeInput, reviewCards]);
 
   const currentItem = quizItems[quizIndex];
+  const nextQuizItem = quizItems[quizIndex + 1];
   const progressText = quizTargetCount ? `${Math.min(quizIndex + 1, quizTargetCount)} / ${quizTargetCount}` : '0 / 0';
 
   useEffect(() => {
@@ -687,6 +689,63 @@ function AppShell({ storage }) {
 
     return () => clearTimeout(timeoutId);
   }, [currentItem?.promptField, currentItem?.promptText, effectiveTtsPitch, effectiveTtsRate, screen]);
+
+  useEffect(() => {
+    if (screen !== 'quiz' || !currentItem) {
+      return undefined;
+    }
+
+    if (currentItem.promptField === 'back') {
+      currentItem.options
+        .filter((option) => option && option !== QUIZ_DONT_KNOW_OPTION)
+        .forEach((option) => {
+          prefetchTts({
+            provider: ttsProvider,
+            text: option,
+            rate: effectiveTtsRate,
+            pitch: effectiveTtsPitch,
+            language: getSpeechLanguage(option),
+            voice: ttsVoice || undefined,
+          }).catch(() => {});
+        });
+    }
+
+    return undefined;
+  }, [currentItem, effectiveTtsPitch, effectiveTtsRate, screen, ttsProvider, ttsVoice]);
+
+  useEffect(() => {
+    if (screen !== 'quiz' || !nextQuizItem) {
+      return undefined;
+    }
+
+    if (nextQuizItem.promptField === 'front' && nextQuizItem.promptText) {
+      prefetchTts({
+        provider: ttsProvider,
+        text: nextQuizItem.promptText,
+        rate: effectiveTtsRate,
+        pitch: effectiveTtsPitch,
+        language: getSpeechLanguage(nextQuizItem.promptText),
+        voice: ttsVoice || undefined,
+      }).catch(() => {});
+    }
+
+    if (nextQuizItem.promptField === 'back') {
+      nextQuizItem.options
+        .filter((option) => option && option !== QUIZ_DONT_KNOW_OPTION)
+        .forEach((option) => {
+          prefetchTts({
+            provider: ttsProvider,
+            text: option,
+            rate: effectiveTtsRate,
+            pitch: effectiveTtsPitch,
+            language: getSpeechLanguage(option),
+            voice: ttsVoice || undefined,
+          }).catch(() => {});
+        });
+    }
+
+    return undefined;
+  }, [effectiveTtsPitch, effectiveTtsRate, nextQuizItem, screen, ttsProvider, ttsVoice]);
 
   const prepareNextQuestionAutoplay = (previousItem, nextItem) => {
     nextPromptAutoplayDelayRef.current =

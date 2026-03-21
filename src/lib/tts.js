@@ -215,6 +215,83 @@ export async function loadTtsBackendStatus({ provider }) {
   };
 }
 
+export async function prefetchTts({ text, language, pitch, provider, rate, voice }) {
+  if (!text) {
+    return {
+      provider,
+      effectiveProvider: provider === TTS_PROVIDER_GOOGLE ? TTS_PROVIDER_GOOGLE : TTS_PROVIDER_SYSTEM,
+      fallback: false,
+      cache: {
+        client: 'skipped',
+        server: 'skipped',
+      },
+      selectedVoice: voice || '',
+      selectedLanguage: language || '',
+    };
+  }
+
+  if (provider === TTS_PROVIDER_GOOGLE && GOOGLE_TTS_PROXY_BASE_URL) {
+    try {
+      const selectedVoice =
+        voice || (await getAutoSelectedGoogleVoiceName({ language, preferredGender: 'MALE' })) || undefined;
+      const selectedLanguage =
+        language || (await getAutoSelectedGoogleVoiceLanguage({ voiceName: selectedVoice })) || undefined;
+      const requestPayload = buildGoogleTtsRequest({
+        text,
+        language: selectedLanguage,
+        voice: selectedVoice,
+        rate,
+        pitch,
+      });
+      const cacheKey = buildGoogleTtsCacheKey({
+        text,
+        language: selectedLanguage,
+        voice: selectedVoice,
+        rate,
+        pitch,
+      });
+      const payload = await fetchGoogleSpeechPayload(requestPayload, cacheKey);
+      await resolveGoogleAudioSource(payload, cacheKey);
+
+      return {
+        provider,
+        effectiveProvider: TTS_PROVIDER_GOOGLE,
+        fallback: false,
+        cache: {
+          client: payload._clientCache || 'unknown',
+          server: payload.cache?.server || 'unknown',
+        },
+        selectedVoice: selectedVoice || '',
+        selectedLanguage: selectedLanguage || '',
+      };
+    } catch {
+      return {
+        provider,
+        effectiveProvider: TTS_PROVIDER_SYSTEM,
+        fallback: true,
+        cache: {
+          client: 'miss',
+          server: 'unknown',
+        },
+        selectedVoice: voice || '',
+        selectedLanguage: language || '',
+      };
+    }
+  }
+
+  return {
+    provider,
+    effectiveProvider: TTS_PROVIDER_SYSTEM,
+    fallback: provider === TTS_PROVIDER_GOOGLE,
+    cache: {
+      client: 'n/a',
+      server: 'n/a',
+    },
+    selectedVoice: voice || '',
+    selectedLanguage: language || '',
+  };
+}
+
 export async function speakWithTts({ text, language, pitch, provider, rate, voice }) {
   if (provider === TTS_PROVIDER_GOOGLE && GOOGLE_TTS_PROXY_BASE_URL) {
     try {
