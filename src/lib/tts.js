@@ -22,6 +22,8 @@ let googlePlayer = null;
 let cachedGoogleVoices = null;
 const googleSpeechPayloadCache = new Map();
 const googleAudioSourceCache = new Map();
+const googleSpeechPayloadPromiseCache = new Map();
+const googleAudioSourcePromiseCache = new Map();
 
 export function getTtsProviderStatus(provider) {
   if (provider === TTS_PROVIDER_GOOGLE) {
@@ -414,47 +416,65 @@ async function resolveGoogleAudioSource(payload, cacheKey) {
     return googleAudioSourceCache.get(cacheKey);
   }
 
-  const audioUrl = payload.audioUrl || payload.audio_url || payload.url || '';
-  if (audioUrl) {
-    if (cacheKey) {
-      googleAudioSourceCache.set(cacheKey, audioUrl);
+  if (cacheKey && googleAudioSourcePromiseCache.has(cacheKey)) {
+    return googleAudioSourcePromiseCache.get(cacheKey);
+  }
+
+  const resolvePromise = (async () => {
+    const audioUrl = payload.audioUrl || payload.audio_url || payload.url || '';
+    if (audioUrl) {
+      if (cacheKey) {
+        googleAudioSourceCache.set(cacheKey, audioUrl);
+      }
+      return audioUrl;
     }
-    return audioUrl;
-  }
 
-  const audioContent = payload.audioContent || payload.audio_content || '';
-  if (!audioContent) {
-    return null;
-  }
-
-  const contentType = payload.contentType || payload.content_type || 'audio/mpeg';
-
-  if (Platform.OS === 'web') {
-    const dataUri = `data:${contentType};base64,${audioContent}`;
-    if (cacheKey) {
-      googleAudioSourceCache.set(cacheKey, dataUri);
+    const audioContent = payload.audioContent || payload.audio_content || '';
+    if (!audioContent) {
+      return null;
     }
-    return dataUri;
-  }
 
-  const outputDirectory = FileSystem.cacheDirectory || FileSystem.documentDirectory;
-  if (!outputDirectory) {
-    return null;
-  }
+    const contentType = payload.contentType || payload.content_type || 'audio/mpeg';
 
-  const fileUri = `${outputDirectory}google-tts-${cacheKey || hashString(audioContent)}.mp3`;
-  const info = await FileSystem.getInfoAsync(fileUri);
-  if (!info.exists) {
-    await FileSystem.writeAsStringAsync(fileUri, audioContent, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
-  }
+    if (Platform.OS === 'web') {
+      const dataUri = `data:${contentType};base64,${audioContent}`;
+      if (cacheKey) {
+        googleAudioSourceCache.set(cacheKey, dataUri);
+      }
+      return dataUri;
+    }
+
+    const outputDirectory = FileSystem.cacheDirectory || FileSystem.documentDirectory;
+    if (!outputDirectory) {
+      return null;
+    }
+
+    const fileUri = `${outputDirectory}google-tts-${cacheKey || hashString(audioContent)}.mp3`;
+    const info = await FileSystem.getInfoAsync(fileUri);
+    if (!info.exists) {
+      await FileSystem.writeAsStringAsync(fileUri, audioContent, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+    }
+
+    if (cacheKey) {
+      googleAudioSourceCache.set(cacheKey, fileUri);
+    }
+
+    return fileUri;
+  })();
 
   if (cacheKey) {
-    googleAudioSourceCache.set(cacheKey, fileUri);
+    googleAudioSourcePromiseCache.set(cacheKey, resolvePromise);
   }
 
-  return fileUri;
+  try {
+    return await resolvePromise;
+  } finally {
+    if (cacheKey) {
+      googleAudioSourcePromiseCache.delete(cacheKey);
+    }
+  }
 }
 
 function normalizeVoiceLanguageCodes(voice) {
@@ -500,24 +520,47 @@ async function fetchGoogleSpeechPayload(requestPayload, cacheKey) {
     };
   }
 
-  const response = await fetch(`${GOOGLE_TTS_PROXY_BASE_URL}/google/speak`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(requestPayload),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Google TTS request failed with ${response.status}`);
+  if (cacheKey && googleSpeechPayloadPromiseCache.has(cacheKey)) {
+    const inFlightPayload = await googleSpeechPayloadPromiseCache.get(cacheKey);
+    return {
+      ...inFlightPayload,
+      _clientCache: 'hit',
+    };
   }
 
-  const payload = await response.json();
+  const fetchPromise = (async () => {
+    const response = await fetch(`${GOOGLE_TTS_PROXY_BASE_URL}/google/speak`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestPayload),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Google TTS request failed with ${response.status}`);
+    }
+
+    const payload = await response.json();
+    if (cacheKey) {
+      googleSpeechPayloadCache.set(cacheKey, payload);
+    }
+    return payload;
+  })();
+
   if (cacheKey) {
-    googleSpeechPayloadCache.set(cacheKey, payload);
+    googleSpeechPayloadPromiseCache.set(cacheKey, fetchPromise);
   }
-  return {
-    ...payload,
-    _clientCache: 'miss',
-  };
+
+  try {
+    const payload = await fetchPromise;
+    return {
+      ...payload,
+      _clientCache: 'miss',
+    };
+  } finally {
+    if (cacheKey) {
+      googleSpeechPayloadPromiseCache.delete(cacheKey);
+    }
+  }
 }
 
 function normalizeVoiceGender(voice) {

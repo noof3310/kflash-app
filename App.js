@@ -634,6 +634,51 @@ function AppShell({ storage }) {
     });
   }, []);
 
+  const prefetchQuizItemAudio = useCallback(
+    (quizItem) => {
+      if (!quizItem) {
+        return Promise.resolve();
+      }
+
+      const tasks = [];
+
+      if (quizItem.promptField === 'front' && quizItem.promptText) {
+        tasks.push(
+          prefetchTts({
+            provider: ttsProvider,
+            text: quizItem.promptText,
+            rate: effectiveTtsRate,
+            pitch: effectiveTtsPitch,
+            language: getSpeechLanguage(quizItem.promptText),
+            voice: ttsVoice || undefined,
+          })
+        );
+      }
+
+      if (quizItem.promptField === 'back') {
+        for (const option of quizItem.options ?? []) {
+          if (!option || option === QUIZ_DONT_KNOW_OPTION) {
+            continue;
+          }
+
+          tasks.push(
+            prefetchTts({
+              provider: ttsProvider,
+              text: option,
+              rate: effectiveTtsRate,
+              pitch: effectiveTtsPitch,
+              language: getSpeechLanguage(option),
+              voice: ttsVoice || undefined,
+            })
+          );
+        }
+      }
+
+      return Promise.allSettled(tasks);
+    },
+    [effectiveTtsPitch, effectiveTtsRate, ttsProvider, ttsVoice]
+  );
+
   const startQuiz = useCallback(async () => {
     const rawRows = reviewCards;
 
@@ -661,6 +706,10 @@ function AppShell({ storage }) {
       quizDirectionMode
     );
 
+    if (firstQuizItem) {
+      prefetchQuizItemAudio(firstQuizItem).catch(() => {});
+    }
+
     setQuizTargetCount(requestedSize);
     setQuizItems(firstQuizItem ? [firstQuizItem] : []);
     setQuizIndex(0);
@@ -670,7 +719,7 @@ function AppShell({ storage }) {
       clearTimeout(feedbackTimeoutRef.current);
     }
     setScreen('quiz');
-  }, [cards, distractorBiasMap, quizDirectionMode, quizSizeInput, reviewCards]);
+  }, [cards, distractorBiasMap, prefetchQuizItemAudio, quizDirectionMode, quizSizeInput, reviewCards]);
 
   const currentItem = quizItems[quizIndex];
   const nextQuizItem = quizItems[quizIndex + 1];
@@ -695,57 +744,18 @@ function AppShell({ storage }) {
       return undefined;
     }
 
-    if (currentItem.promptField === 'back') {
-      currentItem.options
-        .filter((option) => option && option !== QUIZ_DONT_KNOW_OPTION)
-        .forEach((option) => {
-          prefetchTts({
-            provider: ttsProvider,
-            text: option,
-            rate: effectiveTtsRate,
-            pitch: effectiveTtsPitch,
-            language: getSpeechLanguage(option),
-            voice: ttsVoice || undefined,
-          }).catch(() => {});
-        });
-    }
-
+    prefetchQuizItemAudio(currentItem).catch(() => {});
     return undefined;
-  }, [currentItem, effectiveTtsPitch, effectiveTtsRate, screen, ttsProvider, ttsVoice]);
+  }, [currentItem, prefetchQuizItemAudio, screen]);
 
   useEffect(() => {
     if (screen !== 'quiz' || !nextQuizItem) {
       return undefined;
     }
 
-    if (nextQuizItem.promptField === 'front' && nextQuizItem.promptText) {
-      prefetchTts({
-        provider: ttsProvider,
-        text: nextQuizItem.promptText,
-        rate: effectiveTtsRate,
-        pitch: effectiveTtsPitch,
-        language: getSpeechLanguage(nextQuizItem.promptText),
-        voice: ttsVoice || undefined,
-      }).catch(() => {});
-    }
-
-    if (nextQuizItem.promptField === 'back') {
-      nextQuizItem.options
-        .filter((option) => option && option !== QUIZ_DONT_KNOW_OPTION)
-        .forEach((option) => {
-          prefetchTts({
-            provider: ttsProvider,
-            text: option,
-            rate: effectiveTtsRate,
-            pitch: effectiveTtsPitch,
-            language: getSpeechLanguage(option),
-            voice: ttsVoice || undefined,
-          }).catch(() => {});
-        });
-    }
-
+    prefetchQuizItemAudio(nextQuizItem).catch(() => {});
     return undefined;
-  }, [effectiveTtsPitch, effectiveTtsRate, nextQuizItem, screen, ttsProvider, ttsVoice]);
+  }, [nextQuizItem, prefetchQuizItemAudio, screen]);
 
   const prepareNextQuestionAutoplay = (previousItem, nextItem) => {
     nextPromptAutoplayDelayRef.current =
@@ -802,6 +812,7 @@ function AppShell({ storage }) {
           );
           if (nextQuizItem) {
             prepareNextQuestionAutoplay(currentItem, nextQuizItem);
+            prefetchQuizItemAudio(nextQuizItem).catch(() => {});
             setQuizItems((prev) => [...prev, nextQuizItem]);
           }
           setQuizIndex((prev) => prev + 1);
@@ -1557,6 +1568,7 @@ function AppShell({ storage }) {
                   );
                   if (nextQuizItem) {
                     prepareNextQuestionAutoplay(currentItem, nextQuizItem);
+                    prefetchQuizItemAudio(nextQuizItem).catch(() => {});
                     setQuizItems((prev) => [...prev, nextQuizItem]);
                   }
                     setQuizIndex((prev) => prev + 1);
