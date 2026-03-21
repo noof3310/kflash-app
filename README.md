@@ -70,6 +70,21 @@ This writes the deployable output to `dist/`.
 - Build command: `npm run build:web`
 - Output directory: `dist`
 
+This repo also includes serverless API routes under `api/`. When you deploy the whole repository to Vercel, those routes are deployed automatically from the project root:
+
+- `GET /api/google/voices`
+- `POST /api/google/speak`
+
+Important:
+
+- Do not upload only the `dist/` folder. That would deploy only the static web build and skip `api/`.
+- Deploy the repository root, and let Vercel use `dist/` only as the static output directory.
+- Keep the `api/` directory at the repository root.
+
+Recommended:
+
+- Commit [vercel.json](/Users/n.sakulsaowapakkul/Documents/kflash-app/vercel.json) so the build/output settings live in the repo instead of only in the dashboard.
+
 ### Netlify
 
 1. Connect the repo
@@ -83,3 +98,68 @@ This writes the deployable output to `dist/`.
 - Native and web storage are separate. Web data lives in the browser, not in the phone SQLite database.
 - Resetting or clearing browser storage will remove web data.
 - Audio and speech support on web depend on the browser.
+
+## Google TTS backend scaffold
+
+This repo now includes Vercel-style serverless routes for Google Cloud Text-to-Speech:
+
+- `GET /api/health`
+- `GET /api/google/voices`
+- `POST /api/google/speak`
+
+The app uses a TTS abstraction with two providers:
+
+- `system`
+- `google`
+
+If Google is selected but the backend is not configured, the app falls back to system TTS automatically.
+
+### Required backend environment variables
+
+Use either a full service-account JSON blob:
+
+- `GOOGLE_TTS_SERVICE_ACCOUNT_JSON`
+
+Or split fields:
+
+- `GOOGLE_SERVICE_ACCOUNT_EMAIL`
+- `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`
+
+If you use the split private key env var, keep the newline escapes as `\n`.
+
+### App environment variables
+
+- Web on the same Vercel deployment defaults to `/api`, so no extra public env var is required.
+- Native clients should point at the deployed backend with:
+
+```bash
+EXPO_PUBLIC_GOOGLE_TTS_PROXY_BASE_URL=https://your-domain.com/api
+```
+
+### Google provider behavior
+
+- Voice list: app calls `/api/google/voices`
+- Speech synth: app calls `/api/google/speak`
+- Backend exchanges the service account for an OAuth access token and forwards requests to Google Cloud Text-to-Speech
+- The client receives MP3 audio and plays it through the shared app audio path
+
+### Deploy notes
+
+If you deploy on Vercel, add the Google env vars in the project settings and redeploy. The static web app continues to use `dist/`, while the backend routes are deployed from `api/` automatically.
+
+Required Vercel setup:
+
+1. Project source must be the repository root, not the `dist/` folder
+2. Build command: `npm run build:web`
+3. Output directory: `dist`
+4. Add backend env vars in Vercel Project Settings:
+   - `GOOGLE_TTS_SERVICE_ACCOUNT_JSON`
+   - or `GOOGLE_SERVICE_ACCOUNT_EMAIL` and `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`
+5. Redeploy
+
+Quick verification after deploy:
+
+- Open `/api/health`
+- It should return JSON like `{ "ok": true, ... }`
+- Open `/api/google/voices`
+- If credentials are configured correctly, it should return JSON instead of your app HTML

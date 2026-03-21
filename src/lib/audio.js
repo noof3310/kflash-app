@@ -1,1 +1,1 @@
-export { setAudioModeAsync, useAudioPlayer } from 'expo-audio';
+export { createAudioPlayer, setAudioModeAsync, useAudioPlayer } from 'expo-audio';

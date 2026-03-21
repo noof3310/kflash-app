@@ -16,7 +16,6 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { setAudioModeAsync, useAudioPlayer } from './src/lib/audio';
-import * as Speech from 'expo-speech';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import Papa from 'papaparse';
@@ -38,6 +37,14 @@ import {
   getSpeechLanguage,
   getThemeColors,
 } from './src/lib/ui';
+import {
+  getTtsProviderStatus,
+  loadTtsVoices,
+  speakWithTts,
+  stopTtsPlayback,
+  TTS_PROVIDER_OPTIONS,
+  TTS_PROVIDER_SYSTEM,
+} from './src/lib/tts';
 
 const DB_NAME = 'flashcards.db';
 const QUIZ_SIZE_OPTIONS = [10, 20, 30];
@@ -46,6 +53,7 @@ const TTS_PITCH_OPTIONS = [0.8, 1.0, 1.2];
 const DEFAULT_TTS_RATE = 0.9;
 const DEFAULT_TTS_PITCH = 1.0;
 const DEFAULT_TTS_VOICE = '';
+const DEFAULT_TTS_PROVIDER = TTS_PROVIDER_SYSTEM;
 const DEFAULT_THEME = 'light';
 const QUIZ_FEEDBACK_DELAY_MS = 900;
 const QUIZ_CORRECT_SOUND_DURATION_MS = 600;
@@ -186,6 +194,7 @@ function AppShell({ storage }) {
   const [ttsRate, setTtsRate] = useState(DEFAULT_TTS_RATE);
   const [ttsPitch, setTtsPitch] = useState(DEFAULT_TTS_PITCH);
   const [ttsVoice, setTtsVoice] = useState(DEFAULT_TTS_VOICE);
+  const [ttsProvider, setTtsProvider] = useState(DEFAULT_TTS_PROVIDER);
   const [theme, setTheme] = useState(DEFAULT_THEME);
   const [reviewScreenKey, setReviewScreenKey] = useState(0);
   const [debugCountryFilter, setDebugCountryFilter] = useState('all');
@@ -193,6 +202,9 @@ function AppShell({ storage }) {
     loading: false,
     error: '',
     voices: [],
+    effectiveProvider: DEFAULT_TTS_PROVIDER,
+    providerMessage: '',
+    fallback: false,
   });
   const feedbackTimeoutRef = useRef(null);
   const feedbackSoundRequestRef = useRef(0);
@@ -220,20 +232,26 @@ function AppShell({ storage }) {
     setDebugInfo((prev) => ({ ...prev, loading: true, error: '' }));
 
     try {
-      const voices = await Speech.getAvailableVoicesAsync();
+      const voiceResult = await loadTtsVoices({ provider: ttsProvider });
       setDebugInfo({
         loading: false,
         error: '',
-        voices: Array.isArray(voices) ? voices : [],
+        voices: Array.isArray(voiceResult.voices) ? voiceResult.voices : [],
+        effectiveProvider: voiceResult.effectiveProvider,
+        providerMessage: voiceResult.message || '',
+        fallback: Boolean(voiceResult.fallback),
       });
     } catch (error) {
       setDebugInfo({
         loading: false,
         error: error?.message ?? 'Could not load available voices.',
         voices: [],
+        effectiveProvider: getTtsProviderStatus(ttsProvider).effectiveProvider,
+        providerMessage: '',
+        fallback: false,
       });
     }
-  }, []);
+  }, [ttsProvider]);
 
   useEffect(() => {
     refreshAll();
@@ -244,11 +262,13 @@ function AppShell({ storage }) {
       rate: DEFAULT_TTS_RATE,
       pitch: DEFAULT_TTS_PITCH,
       voice: DEFAULT_TTS_VOICE,
+      provider: DEFAULT_TTS_PROVIDER,
       theme: DEFAULT_THEME,
     }).then((settings) => {
       setTtsRate(settings.rate);
       setTtsPitch(settings.pitch);
       setTtsVoice(settings.voice || DEFAULT_TTS_VOICE);
+      setTtsProvider(settings.provider || DEFAULT_TTS_PROVIDER);
       setTheme(settings.theme);
     });
   }, [storage]);
@@ -464,6 +484,10 @@ function AppShell({ storage }) {
   const isDarkMode = theme === 'dark';
   const colors = useMemo(() => getThemeColors(isDarkMode), [isDarkMode]);
   const statusBarStyle = isDarkMode ? 'light' : 'dark';
+  const currentTtsProviderStatus = useMemo(
+    () => getTtsProviderStatus(ttsProvider),
+    [ttsProvider]
+  );
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') {
@@ -894,15 +918,16 @@ function AppShell({ storage }) {
     (text, overrides = {}) => {
       const language = overrides.language ?? getSpeechLanguage(text);
 
-      Speech.stop();
-      Speech.speak(text, {
+      return speakWithTts({
+        provider: overrides.provider ?? ttsProvider,
+        text,
         rate: overrides.rate ?? ttsRate,
         pitch: overrides.pitch ?? ttsPitch,
         language,
         voice: (overrides.voice ?? ttsVoice) || undefined,
       });
     },
-    [ttsPitch, ttsRate, ttsVoice]
+    [ttsPitch, ttsProvider, ttsRate, ttsVoice]
   );
 
   const speakFrontText = useCallback(
@@ -941,7 +966,7 @@ function AppShell({ storage }) {
     const requestId = feedbackSoundRequestRef.current + 1;
     feedbackSoundRequestRef.current = requestId;
 
-    Speech.stop();
+    await stopTtsPlayback();
 
     try {
       correctPlayer.pause();
@@ -959,7 +984,9 @@ function AppShell({ storage }) {
       player.play();
       return requestId;
     } catch (error) {
-      Speech.speak(isCorrect ? 'Correct' : 'Incorrect', {
+      await speakWithTts({
+        provider: TTS_PROVIDER_SYSTEM,
+        text: isCorrect ? 'Correct' : 'Incorrect',
         rate: 0.95,
         pitch: isCorrect ? 1.0 : 0.85,
       });
@@ -1052,6 +1079,7 @@ function AppShell({ storage }) {
           setTtsRate(DEFAULT_TTS_RATE);
           setTtsPitch(DEFAULT_TTS_PITCH);
           setTtsVoice(DEFAULT_TTS_VOICE);
+          setTtsProvider(DEFAULT_TTS_PROVIDER);
           setScreen('home');
           await refreshAll();
           showAlert('Schema reset', 'The local database has been rebuilt.');
@@ -1079,6 +1107,7 @@ function AppShell({ storage }) {
     if (feedbackTimeoutRef.current) {
       clearTimeout(feedbackTimeoutRef.current);
     }
+    await stopTtsPlayback();
     await refreshAll();
     setSetSearchQuery('');
     setShowAllSets(false);
@@ -1566,6 +1595,10 @@ function AppShell({ storage }) {
             <View style={styles.debugInfoList}>
               <Text style={[styles.debugInfoText, { color: colors.primaryText }]}>Platform: {Platform.OS}</Text>
               <Text style={[styles.debugInfoText, { color: colors.primaryText }]}>Theme: {theme}</Text>
+              <Text style={[styles.debugInfoText, { color: colors.primaryText }]}>Provider: {ttsProvider}</Text>
+              <Text style={[styles.debugInfoText, { color: colors.primaryText }]}>
+                Effective provider: {debugInfo.effectiveProvider}
+              </Text>
               <Text style={[styles.debugInfoText, { color: colors.primaryText }]}>TTS rate: {ttsRate}</Text>
               <Text style={[styles.debugInfoText, { color: colors.primaryText }]}>TTS pitch: {ttsPitch}</Text>
               <Text style={[styles.debugInfoText, { color: colors.primaryText }]}>
@@ -1580,6 +1613,11 @@ function AppShell({ storage }) {
                 </Text>
               ) : null}
             </View>
+            {debugInfo.providerMessage ? (
+              <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
+                {debugInfo.providerMessage}
+              </Text>
+            ) : null}
           </View>
 
           {debugInfo.loading ? (
@@ -1967,6 +2005,33 @@ function AppShell({ storage }) {
       <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>Speech settings</Text>
         <Text style={[styles.mutedText, { color: colors.secondaryText }]}>Adjust speech playback to match the way you want cards to sound.</Text>
+
+        <View style={styles.settingsGroup}>
+          <Text style={[styles.settingsLabel, { color: colors.primaryText }]}>Provider</Text>
+          <View style={styles.filterRow}>
+            {TTS_PROVIDER_OPTIONS.map((option) => {
+              const active = ttsProvider === option.value;
+              return (
+                <Pressable
+                  key={option.value}
+                  style={[
+                    styles.filterChip,
+                    { backgroundColor: colors.softSurface, borderColor: colors.border },
+                    active && { backgroundColor: colors.primaryText, borderColor: colors.primaryText },
+                  ]}
+                  onPress={() => updateSpeechSetting('tts_provider', option.value, setTtsProvider)}
+                >
+                  <Text style={[styles.filterChipText, { color: active ? colors.surface : colors.primaryText }]}>
+                    {option.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
+            {currentTtsProviderStatus.message}
+          </Text>
+        </View>
 
         <View style={styles.settingsGroup}>
           <Text style={[styles.settingsLabel, { color: colors.primaryText }]}>Speed</Text>

@@ -4,6 +4,71 @@ const FEEDBACK_GAIN = 5;
 
 export async function setAudioModeAsync() {}
 
+export function createAudioPlayer(source) {
+  let audio = null;
+  let audioSource = getAssetUri(source);
+
+  const ensureAudio = () => {
+    if (typeof window === 'undefined' || typeof window.Audio === 'undefined') {
+      return null;
+    }
+
+    if (!audio) {
+      audio = new window.Audio(audioSource || undefined);
+      audio.preload = 'auto';
+    }
+
+    return audio;
+  };
+
+  return {
+    async play() {
+      const element = ensureAudio();
+      if (!element || !audioSource) {
+        return;
+      }
+
+      if (element.src !== audioSource) {
+        element.src = audioSource;
+      }
+
+      await element.play().catch(() => {});
+    },
+    pause() {
+      audio?.pause();
+    },
+    replace(nextSource) {
+      audioSource = getAssetUri(nextSource);
+      if (!audio) {
+        return;
+      }
+
+      audio.pause();
+      audio.src = audioSource || '';
+      audio.load();
+    },
+    seekTo(seconds) {
+      if (!audio) {
+        return;
+      }
+
+      try {
+        audio.currentTime = Number(seconds) || 0;
+      } catch {}
+    },
+    remove() {
+      if (!audio) {
+        return;
+      }
+
+      audio.pause();
+      audio.src = '';
+      audio.load();
+      audio = null;
+    },
+  };
+}
+
 export function useAudioPlayer(source) {
   const audioContextRef = useRef(null);
   const audioBufferRef = useRef(null);
