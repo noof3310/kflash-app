@@ -10,7 +10,11 @@
     ],
     "web": {
       "bundler": "metro",
-      "output": "single"
+      "output": "single",
+      "favicon": "./public/favicon.png",
+      "name": "Flash Card",
+      "shortName": "FlashCard",
+      "lang": "en"
     },
     "ios": {
       "supportsTablet": true,
