@@ -11,8 +11,45 @@ export function findSpeechPreviewText(cards) {
   return koreanCard?.front ?? '안녕하세요';
 }
 
-export function getThemeColors(isDarkMode) {
-  if (isDarkMode) {
+export function getThemeColors(theme = 'light') {
+  if (theme === 'pink') {
+    return {
+      screenBackground: '#1a1c26',
+      surface: '#242634',
+      softSurface: '#2d2f42',
+      elevatedSurface: '#303247',
+      inputBackground: '#1e202b',
+      border: '#494c66',
+      primaryText: '#f7eff7',
+      secondaryText: '#c7bed1',
+      tertiaryText: '#9f93b1',
+      primaryButton: '#ff7c8e',
+      primaryButtonText: '#1a1c26',
+      accentText: '#ff9aa8',
+      softAccent: '#3a3150',
+      accentBorder: '#9b7bd7',
+      heroSurface: '#1e202b',
+      heroBorder: '#5d4f7d',
+      heroBadgeBackground: '#2d2f42',
+      heroBadgeText: '#ff7c8e',
+      stickySurface: 'rgba(26, 28, 38, 0.94)',
+      modalBackdrop: 'rgba(10, 10, 16, 0.74)',
+      dangerSurface: '#432632',
+      dangerBorder: '#d06a8d',
+      dangerText: '#ffc1cf',
+      correctBackground: '#203a37',
+      correctBorder: '#5bc7a8',
+      correctText: '#b9f4e2',
+      warningBackground: '#4a3244',
+      warningBorder: '#f0a2c1',
+      warningText: '#ffd9ea',
+      errorBackground: '#4a2736',
+      errorBorder: '#ff7c8e',
+      errorText: '#ffd0d8',
+    };
+  }
+
+  if (theme === 'dark') {
     return {
       screenBackground: '#0d1321',
       surface: '#151d2f',

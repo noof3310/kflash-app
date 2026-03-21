@@ -495,9 +495,9 @@ function AppShell({ storage }) {
     }),
     [answers, resultCards]
   );
-  const isDarkMode = theme === 'dark';
-  const colors = useMemo(() => getThemeColors(isDarkMode), [isDarkMode]);
-  const statusBarStyle = isDarkMode ? 'light' : 'dark';
+  const isDarkTheme = theme !== 'light';
+  const colors = useMemo(() => getThemeColors(theme), [theme]);
+  const statusBarStyle = isDarkTheme ? 'light' : 'dark';
   const currentTtsProviderStatus = useMemo(
     () => getTtsProviderStatus(ttsProvider),
     [ttsProvider]
@@ -521,7 +521,7 @@ function AppShell({ storage }) {
     const previousRootOverscroll = root?.style.overscrollBehaviorY ?? '';
 
     documentElement.style.backgroundColor = colors.screenBackground;
-    documentElement.style.colorScheme = isDarkMode ? 'dark' : 'light';
+    documentElement.style.colorScheme = isDarkTheme ? 'dark' : 'light';
     body.style.backgroundColor = colors.screenBackground;
     body.style.overscrollBehaviorY = 'none';
 
@@ -562,7 +562,7 @@ function AppShell({ storage }) {
         }
       }
     };
-  }, [colors.screenBackground, isDarkMode]);
+  }, [colors.screenBackground, isDarkTheme]);
 
   useEffect(() => {
     if (screen !== 'debug') {
@@ -1922,8 +1922,6 @@ function AppShell({ storage }) {
       showsVerticalScrollIndicator={false}
     >
       <Animated.View style={[styles.heroCard, animatedHeroStyle, { backgroundColor: colors.heroSurface, borderColor: colors.heroBorder }]}>
-        <View style={[styles.heroOrb, styles.heroOrbLarge, { backgroundColor: colors.heroBadgeBackground }]} />
-        <View style={[styles.heroOrb, styles.heroOrbSmall, { backgroundColor: colors.softAccent }]} />
         <Pressable
           style={[styles.heroBadge, { backgroundColor: colors.heroBadgeBackground }]}
           onPress={handleDebugUnlockTap}
@@ -1953,7 +1951,7 @@ function AppShell({ storage }) {
       <View style={[styles.sectionCard, styles.compactSectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>Appearance</Text>
         <View style={styles.quizSizeRow}>
-          {['light', 'dark'].map((value) => {
+          {['light', 'dark', 'pink'].map((value) => {
             const active = theme === value;
             return (
               <Pressable
@@ -1971,7 +1969,7 @@ function AppShell({ storage }) {
                     { color: active ? colors.surface : colors.primaryText },
                   ]}
                 >
-                  {value === 'light' ? 'Light' : 'Dark'}
+                  {value === 'light' ? 'Light' : value === 'dark' ? 'Dark' : 'Pink'}
                 </Text>
               </Pressable>
             );
