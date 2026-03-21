@@ -1,103 +1,71 @@
+const DATABASE_VERSION = 2;
+
+const SCHEMA_SQL = `
+  CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY NOT NULL,
+    value TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS sets (
+    id INTEGER PRIMARY KEY NOT NULL,
+    name TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS cards (
+    id INTEGER PRIMARY KEY NOT NULL,
+    front TEXT NOT NULL,
+    type TEXT NOT NULL DEFAULT '',
+    back TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(front, type, back)
+  );
+
+  CREATE TABLE IF NOT EXISTS set_cards (
+    set_id INTEGER NOT NULL,
+    card_id INTEGER NOT NULL,
+    PRIMARY KEY (set_id, card_id),
+    FOREIGN KEY (set_id) REFERENCES sets(id) ON DELETE CASCADE,
+    FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS quiz_sessions (
+    id INTEGER PRIMARY KEY NOT NULL,
+    started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    score INTEGER NOT NULL,
+    total INTEGER NOT NULL,
+    selected_set_ids TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS quiz_answers (
+    id INTEGER PRIMARY KEY NOT NULL,
+    quiz_session_id INTEGER NOT NULL,
+    card_id INTEGER NOT NULL,
+    chosen_back TEXT NOT NULL,
+    is_correct INTEGER NOT NULL,
+    FOREIGN KEY (quiz_session_id) REFERENCES quiz_sessions(id) ON DELETE CASCADE,
+    FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS card_progress (
+    card_id INTEGER PRIMARY KEY NOT NULL,
+    last_reviewed_at TEXT,
+    next_due_at TEXT,
+    correct_streak INTEGER NOT NULL DEFAULT 0,
+    interval_days INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE
+  );
+`;
+
 export async function migrateDbIfNeeded(db) {
-  const DATABASE_VERSION = 2;
-  const versionRow = await db.getFirstAsync('PRAGMA user_version');
-  const currentVersion = versionRow?.user_version ?? 0;
+  await db.getFirstAsync('PRAGMA user_version');
 
   await db.execAsync(`
     PRAGMA journal_mode = WAL;
     PRAGMA foreign_keys = ON;
   `);
 
-  await db.execAsync(`
-    CREATE TABLE IF NOT EXISTS app_settings (
-      key TEXT PRIMARY KEY NOT NULL,
-      value TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS sets (
-      id INTEGER PRIMARY KEY NOT NULL,
-      name TEXT NOT NULL UNIQUE,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE TABLE IF NOT EXISTS cards (
-      id INTEGER PRIMARY KEY NOT NULL,
-      front TEXT NOT NULL,
-      type TEXT NOT NULL DEFAULT '',
-      back TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(front, type, back)
-    );
-
-    CREATE TABLE IF NOT EXISTS card_progress (
-      card_id INTEGER PRIMARY KEY NOT NULL,
-      last_reviewed_at TEXT,
-      next_due_at TEXT,
-      correct_streak INTEGER NOT NULL DEFAULT 0,
-      interval_days INTEGER NOT NULL DEFAULT 0,
-      FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE
-    );
-  `);
-
-  if (currentVersion === 0) {
-    await db.execAsync(`
-      CREATE TABLE IF NOT EXISTS sets (
-        id INTEGER PRIMARY KEY NOT NULL,
-        name TEXT NOT NULL UNIQUE,
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS cards (
-        id INTEGER PRIMARY KEY NOT NULL,
-        front TEXT NOT NULL,
-        type TEXT NOT NULL DEFAULT '',
-        back TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(front, type, back)
-      );
-
-      CREATE TABLE IF NOT EXISTS set_cards (
-        set_id INTEGER NOT NULL,
-        card_id INTEGER NOT NULL,
-        PRIMARY KEY (set_id, card_id),
-        FOREIGN KEY (set_id) REFERENCES sets(id) ON DELETE CASCADE,
-        FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE
-      );
-
-      CREATE TABLE IF NOT EXISTS quiz_sessions (
-        id INTEGER PRIMARY KEY NOT NULL,
-        started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        score INTEGER NOT NULL,
-        total INTEGER NOT NULL,
-        selected_set_ids TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS quiz_answers (
-        id INTEGER PRIMARY KEY NOT NULL,
-        quiz_session_id INTEGER NOT NULL,
-        card_id INTEGER NOT NULL,
-        chosen_back TEXT NOT NULL,
-        is_correct INTEGER NOT NULL,
-        FOREIGN KEY (quiz_session_id) REFERENCES quiz_sessions(id) ON DELETE CASCADE,
-        FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE
-      );
-
-      CREATE TABLE IF NOT EXISTS app_settings (
-        key TEXT PRIMARY KEY NOT NULL,
-        value TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS card_progress (
-        card_id INTEGER PRIMARY KEY NOT NULL,
-        last_reviewed_at TEXT,
-        next_due_at TEXT,
-        correct_streak INTEGER NOT NULL DEFAULT 0,
-        interval_days INTEGER NOT NULL DEFAULT 0,
-        FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE
-      );
-    `);
-  }
-
+  await db.execAsync(SCHEMA_SQL);
   await db.execAsync(`PRAGMA user_version = ${DATABASE_VERSION}`);
 }
 

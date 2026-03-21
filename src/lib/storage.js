@@ -123,33 +123,15 @@ export function createNativeStorage(db) {
 
     importCsvRows(rows) {
       return db.withTransactionAsync(async () => {
+        const importContext = createImportLookupContext(db);
+
         for (const row of rows) {
-          let setRecord = await db.getFirstAsync(
-            'SELECT id FROM sets WHERE lower(name) = lower(?) LIMIT 1',
-            [row.set]
-          );
-
-          if (!setRecord) {
-            const createSetResult = await db.runAsync('INSERT INTO sets (name) VALUES (?)', [row.set]);
-            setRecord = { id: createSetResult.lastInsertRowId };
-          }
-
-          let cardRecord = await db.getFirstAsync(
-            'SELECT id FROM cards WHERE front = ? AND type = ? AND back = ? LIMIT 1',
-            [row.front, row.type, row.back]
-          );
-
-          if (!cardRecord) {
-            const createCardResult = await db.runAsync(
-              'INSERT INTO cards (front, type, back) VALUES (?, ?, ?)',
-              [row.front, row.type, row.back]
-            );
-            cardRecord = { id: createCardResult.lastInsertRowId };
-          }
+          const setId = await importContext.getOrCreateSetId(row.set);
+          const cardId = await importContext.getOrCreateCardId(row);
 
           await db.runAsync(
             'INSERT OR IGNORE INTO set_cards (set_id, card_id) VALUES (?, ?)',
-            [setRecord.id, cardRecord.id]
+            [setId, cardId]
           );
         }
       });
@@ -213,46 +195,27 @@ export function createNativeStorage(db) {
 
         const importedCards = [];
         const setAccuracyStats = new Map();
+        const importContext = createImportLookupContext(db);
 
         for (const row of rows) {
           const setIds = [];
           for (const setName of row.setNames) {
-            let setRecord = await db.getFirstAsync(
-              'SELECT id FROM sets WHERE lower(name) = lower(?) LIMIT 1',
-              [setName]
-            );
-
-            if (!setRecord) {
-              const createSetResult = await db.runAsync('INSERT INTO sets (name) VALUES (?)', [setName]);
-              setRecord = { id: createSetResult.lastInsertRowId };
-            }
-
-            setIds.push(Number(setRecord.id));
+            const setId = await importContext.getOrCreateSetId(setName);
+            setIds.push(setId);
           }
 
-          let cardRecord = await db.getFirstAsync(
-            'SELECT id FROM cards WHERE front = ? AND type = ? AND back = ? LIMIT 1',
-            [row.front, row.type, row.back]
-          );
-
-          if (!cardRecord) {
-            const createCardResult = await db.runAsync(
-              'INSERT INTO cards (front, type, back) VALUES (?, ?, ?)',
-              [row.front, row.type, row.back]
-            );
-            cardRecord = { id: createCardResult.lastInsertRowId };
-          }
+          const cardId = await importContext.getOrCreateCardId(row);
 
           for (const setId of setIds) {
             await db.runAsync(
               'INSERT OR IGNORE INTO set_cards (set_id, card_id) VALUES (?, ?)',
-              [setId, cardRecord.id]
+              [setId, cardId]
             );
           }
 
           importedCards.push({
             ...row,
-            cardId: Number(cardRecord.id),
+            cardId,
           });
 
           for (const setId of setIds) {
@@ -951,4 +914,73 @@ function getNextIntervalDays(streak, previousIntervalDays) {
   }
 
   return Math.min(60, Math.max(14, previousIntervalDays * 2));
+}
+
+function createImportLookupContext(db) {
+  const setIdCache = new Map();
+  const cardIdCache = new Map();
+
+  return {
+    async getOrCreateSetId(name) {
+      const normalizedName = String(name || '').trim();
+      if (!normalizedName) {
+        throw new Error('Set name is required.');
+      }
+
+      const cacheKey = normalizedName.toLowerCase();
+      if (setIdCache.has(cacheKey)) {
+        return setIdCache.get(cacheKey);
+      }
+
+      let setRecord = await db.getFirstAsync(
+        'SELECT id FROM sets WHERE lower(name) = lower(?) LIMIT 1',
+        [normalizedName]
+      );
+
+      if (!setRecord) {
+        const createSetResult = await db.runAsync('INSERT INTO sets (name) VALUES (?)', [normalizedName]);
+        setRecord = { id: createSetResult.lastInsertRowId };
+      }
+
+      const setId = Number(setRecord.id);
+      setIdCache.set(cacheKey, setId);
+      return setId;
+    },
+
+    async getOrCreateCardId(card) {
+      const cardKey = buildCardLookupKey(card);
+      if (cardIdCache.has(cardKey)) {
+        return cardIdCache.get(cardKey);
+      }
+
+      const front = String(card?.front || '');
+      const type = String(card?.type || '');
+      const back = String(card?.back || '');
+
+      let cardRecord = await db.getFirstAsync(
+        'SELECT id FROM cards WHERE front = ? AND type = ? AND back = ? LIMIT 1',
+        [front, type, back]
+      );
+
+      if (!cardRecord) {
+        const createCardResult = await db.runAsync(
+          'INSERT INTO cards (front, type, back) VALUES (?, ?, ?)',
+          [front, type, back]
+        );
+        cardRecord = { id: createCardResult.lastInsertRowId };
+      }
+
+      const cardId = Number(cardRecord.id);
+      cardIdCache.set(cardKey, cardId);
+      return cardId;
+    },
+  };
+}
+
+function buildCardLookupKey(card) {
+  return JSON.stringify([
+    String(card?.front || ''),
+    String(card?.type || ''),
+    String(card?.back || ''),
+  ]);
 }
