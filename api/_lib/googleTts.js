@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { put } from '@vercel/blob';
 
 const GOOGLE_OAUTH_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_TTS_BASE_URL = 'https://texttospeech.googleapis.com/v1';
@@ -6,12 +7,23 @@ const GOOGLE_TTS_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
 const GOOGLE_TOKEN_REFRESH_BUFFER_MS = 60 * 1000;
 const GOOGLE_VOICES_CACHE_TTL_MS = 60 * 60 * 1000;
 const GOOGLE_SPEECH_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const GOOGLE_SPEECH_CACHE_TTL_SECONDS = 24 * 60 * 60;
 const GOOGLE_SPEECH_CACHE_LIMIT = 200;
+const GOOGLE_BLOB_CACHE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
+const GOOGLE_TTS_BLOB_PREFIX = 'tts-cache';
+const TTS_ANALYTICS_KEY_PREFIX = 'tts:analytics';
+const TTS_ANALYTICS_FIELDS = ['requests', 'memory_hit', 'persistent_hit', 'miss'];
 
 let cachedAccessToken = '';
 let cachedAccessTokenExpiresAt = 0;
 const cachedVoicesByLanguage = new Map();
 const cachedSpeechPayloads = new Map();
+const inMemoryAnalytics = {
+  requests: 0,
+  memory_hit: 0,
+  persistent_hit: 0,
+  miss: 0,
+};
 
 export async function listGoogleVoices({ languageCode } = {}) {
   const voiceCacheKey = String(languageCode || '');
@@ -52,9 +64,25 @@ export async function synthesizeGoogleSpeech(payload) {
   const speechCacheKey = buildSpeechCacheKey(payload);
   const cachedSpeechEntry = cachedSpeechPayloads.get(speechCacheKey);
   if (cachedSpeechEntry && cachedSpeechEntry.expiresAt > Date.now()) {
+    await recordTtsAnalytics('memory-hit');
     return {
       payload: cachedSpeechEntry.payload,
-      cache: { server: 'hit' },
+      cache: { server: 'memory-hit' },
+    };
+  }
+
+  const persistentCachedPayload = await getPersistentSpeechPayload(speechCacheKey);
+  if (persistentCachedPayload) {
+    cachedSpeechPayloads.set(speechCacheKey, {
+      payload: persistentCachedPayload,
+      expiresAt: Date.now() + GOOGLE_SPEECH_CACHE_TTL_MS,
+    });
+    trimSpeechCacheIfNeeded();
+    await recordTtsAnalytics('persistent-hit');
+
+    return {
+      payload: persistentCachedPayload,
+      cache: { server: 'persistent-hit' },
     };
   }
 
@@ -74,15 +102,45 @@ export async function synthesizeGoogleSpeech(payload) {
   }
 
   const responsePayload = await response.json();
+  const persistentPayload = await persistSpeechPayload(speechCacheKey, responsePayload);
+  const cacheablePayload = persistentPayload || responsePayload;
   cachedSpeechPayloads.set(speechCacheKey, {
-    payload: responsePayload,
+    payload: cacheablePayload,
     expiresAt: Date.now() + GOOGLE_SPEECH_CACHE_TTL_MS,
   });
   trimSpeechCacheIfNeeded();
+  await recordTtsAnalytics('miss');
 
   return {
-    payload: responsePayload,
+    payload: cacheablePayload,
     cache: { server: 'miss' },
+  };
+}
+
+export async function getGoogleTtsBackendStatus() {
+  const analytics = await loadTtsAnalyticsSnapshot();
+  const requests = analytics.requests;
+
+  return {
+    ok: true,
+    provider: 'google',
+    config: {
+      googleCredentialsConfigured: isGoogleCredentialsConfigured(),
+      redisConfigured: isRedisConfigured(),
+      blobConfigured: isBlobConfigured(),
+      persistentCacheConfigured: isPersistentSpeechCacheConfigured(),
+    },
+    cache: {
+      inMemoryVoiceEntries: cachedVoicesByLanguage.size,
+      inMemorySpeechEntries: cachedSpeechPayloads.size,
+      analyticsWindow: getAnalyticsWindowLabel(),
+      requests,
+      memoryHitCount: analytics.memory_hit,
+      persistentHitCount: analytics.persistent_hit,
+      missCount: analytics.miss,
+      hitRatio: requests > 0 ? roundRatio((analytics.memory_hit + analytics.persistent_hit) / requests) : 0,
+      missRatio: requests > 0 ? roundRatio(analytics.miss / requests) : 0,
+    },
   };
 }
 
@@ -242,4 +300,195 @@ function trimSpeechCacheIfNeeded() {
   if (oldestKey) {
     cachedSpeechPayloads.delete(oldestKey);
   }
+}
+
+async function getPersistentSpeechPayload(speechCacheKey) {
+  if (!isPersistentSpeechCacheConfigured()) {
+    return null;
+  }
+
+  try {
+    const cacheKey = getPersistentSpeechRedisKey(speechCacheKey);
+    const response = await upstashCommand(['GET', cacheKey]);
+    const rawValue = response?.result;
+    if (!rawValue || typeof rawValue !== 'string') {
+      return null;
+    }
+
+    const parsed = JSON.parse(rawValue);
+    const audioUrl = String(parsed?.audioUrl || '').trim();
+    if (!audioUrl) {
+      return null;
+    }
+
+    return {
+      audioUrl,
+      contentType: parsed?.contentType || 'audio/mpeg',
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function persistSpeechPayload(speechCacheKey, googlePayload) {
+  if (!isPersistentSpeechCacheConfigured()) {
+    return null;
+  }
+
+  const audioContent = String(googlePayload?.audioContent || '').trim();
+  if (!audioContent) {
+    return null;
+  }
+
+  try {
+    const pathname = `${GOOGLE_TTS_BLOB_PREFIX}/${speechCacheKey}.mp3`;
+    const blob = await put(pathname, Buffer.from(audioContent, 'base64'), {
+      access: 'public',
+      addRandomSuffix: false,
+      allowOverwrite: true,
+      contentType: 'audio/mpeg',
+      cacheControlMaxAge: GOOGLE_BLOB_CACHE_MAX_AGE_SECONDS,
+      token: process.env.BLOB_READ_WRITE_TOKEN,
+    });
+
+    const persistentPayload = {
+      audioUrl: blob.url,
+      contentType: 'audio/mpeg',
+    };
+
+    await upstashCommand(
+      ['SETEX', getPersistentSpeechRedisKey(speechCacheKey), GOOGLE_SPEECH_CACHE_TTL_SECONDS, JSON.stringify(persistentPayload)]
+    );
+
+    return persistentPayload;
+  } catch {
+    return null;
+  }
+}
+
+function isPersistentSpeechCacheConfigured() {
+  return isRedisConfigured() && isBlobConfigured();
+}
+
+function getPersistentSpeechRedisKey(speechCacheKey) {
+  return `tts:${speechCacheKey}`;
+}
+
+async function upstashCommand(command) {
+  const restUrl = getUpstashRestUrl();
+  const restToken = getUpstashRestToken();
+
+  if (!restUrl || !restToken) {
+    throw new Error('Upstash Redis is not configured.');
+  }
+
+  const response = await fetch(restUrl, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${restToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(command),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => '');
+    throw new Error(`Upstash command failed with ${response.status}: ${errorText}`);
+  }
+
+  const payload = await response.json();
+  if (payload?.error) {
+    throw new Error(payload.error);
+  }
+
+  return payload;
+}
+
+async function recordTtsAnalytics(source) {
+  inMemoryAnalytics.requests += 1;
+  if (source === 'memory-hit') {
+    inMemoryAnalytics.memory_hit += 1;
+  } else if (source === 'persistent-hit') {
+    inMemoryAnalytics.persistent_hit += 1;
+  } else {
+    inMemoryAnalytics.miss += 1;
+  }
+
+  if (!isRedisConfigured()) {
+    return;
+  }
+
+  try {
+    const key = getAnalyticsRedisKey();
+    const field = source === 'memory-hit' ? 'memory_hit' : source === 'persistent-hit' ? 'persistent_hit' : 'miss';
+    await Promise.all([
+      upstashCommand(['HINCRBY', key, 'requests', 1]),
+      upstashCommand(['HINCRBY', key, field, 1]),
+      upstashCommand(['EXPIRE', key, GOOGLE_BLOB_CACHE_MAX_AGE_SECONDS]),
+    ]);
+  } catch {}
+}
+
+async function loadTtsAnalyticsSnapshot() {
+  if (!isRedisConfigured()) {
+    return { ...inMemoryAnalytics };
+  }
+
+  try {
+    const response = await upstashCommand(['HMGET', getAnalyticsRedisKey(), ...TTS_ANALYTICS_FIELDS]);
+    const values = Array.isArray(response?.result) ? response.result : [];
+    return {
+      requests: parseCounterValue(values[0]),
+      memory_hit: parseCounterValue(values[1]),
+      persistent_hit: parseCounterValue(values[2]),
+      miss: parseCounterValue(values[3]),
+    };
+  } catch {
+    return { ...inMemoryAnalytics };
+  }
+}
+
+function isRedisConfigured() {
+  return Boolean(getUpstashRestUrl() && getUpstashRestToken());
+}
+
+function isBlobConfigured() {
+  return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+}
+
+function getUpstashRestUrl() {
+  return (
+    process.env.UPSTASH_REDIS_REST_KV_REST_API_URL ||
+    process.env.UPSTASH_REDIS_REST_URL ||
+    ''
+  );
+}
+
+function getUpstashRestToken() {
+  return (
+    process.env.UPSTASH_REDIS_REST_KV_REST_API_TOKEN ||
+    process.env.UPSTASH_REDIS_REST_TOKEN ||
+    ''
+  );
+}
+
+function isGoogleCredentialsConfigured() {
+  const { clientEmail, privateKey } = getGoogleServiceAccount();
+  return Boolean(clientEmail && privateKey);
+}
+
+function getAnalyticsRedisKey() {
+  return `${TTS_ANALYTICS_KEY_PREFIX}:${getAnalyticsWindowLabel()}`;
+}
+
+function getAnalyticsWindowLabel() {
+  return new Date().toISOString().slice(0, 7);
+}
+
+function parseCounterValue(value) {
+  return Number.parseInt(String(value ?? '0'), 10) || 0;
+}
+
+function roundRatio(value) {
+  return Math.round(value * 1000) / 1000;
 }

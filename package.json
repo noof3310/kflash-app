@@ -12,6 +12,7 @@
     "test": "jest --runInBand"
   },
   "dependencies": {
+    "@vercel/blob": "^2.3.1",
     "expo": "~54.0.21",
     "expo-audio": "~1.1.1",
     "expo-document-picker": "~14.0.8",

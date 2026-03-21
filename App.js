@@ -40,6 +40,7 @@ import {
 import {
   TTS_PROVIDER_GOOGLE,
   getTtsProviderStatus,
+  loadTtsBackendStatus,
   loadTtsVoices,
   speakWithTts,
   stopTtsPlayback,
@@ -206,6 +207,7 @@ function AppShell({ storage }) {
     effectiveProvider: DEFAULT_TTS_PROVIDER,
     providerMessage: '',
     fallback: false,
+    backendStatus: null,
     lastSpeech: null,
   });
   const feedbackTimeoutRef = useRef(null);
@@ -234,7 +236,10 @@ function AppShell({ storage }) {
     setDebugInfo((prev) => ({ ...prev, loading: true, error: '' }));
 
     try {
-      const voiceResult = await loadTtsVoices({ provider: ttsProvider });
+      const [voiceResult, backendStatus] = await Promise.all([
+        loadTtsVoices({ provider: ttsProvider }),
+        loadTtsBackendStatus({ provider: ttsProvider }).catch(() => null),
+      ]);
       setDebugInfo((prev) => ({
         ...prev,
         loading: false,
@@ -243,6 +248,7 @@ function AppShell({ storage }) {
         effectiveProvider: voiceResult.effectiveProvider,
         providerMessage: voiceResult.message || '',
         fallback: Boolean(voiceResult.fallback),
+        backendStatus,
       }));
     } catch (error) {
       setDebugInfo((prev) => ({
@@ -253,6 +259,7 @@ function AppShell({ storage }) {
         effectiveProvider: getTtsProviderStatus(ttsProvider).effectiveProvider,
         providerMessage: '',
         fallback: false,
+        backendStatus: null,
       }));
     }
   }, [ttsProvider]);
@@ -1647,6 +1654,44 @@ function AppShell({ storage }) {
                 {debugInfo.providerMessage}
               </Text>
             ) : null}
+            {debugInfo.backendStatus ? (
+              <View style={[styles.debugLastSpeechCard, { backgroundColor: colors.softSurface, borderColor: colors.border }]}>
+                <Text style={[styles.settingsLabel, { color: colors.primaryText }]}>Backend cache status</Text>
+                <Text style={[styles.debugInfoText, { color: colors.primaryText }]}>
+                  Google credentials: {debugInfo.backendStatus.config?.googleCredentialsConfigured ? 'configured' : 'missing'}
+                </Text>
+                <Text style={[styles.debugInfoText, { color: colors.primaryText }]}>
+                  Redis: {debugInfo.backendStatus.config?.redisConfigured ? 'configured' : 'missing'}
+                </Text>
+                <Text style={[styles.debugInfoText, { color: colors.primaryText }]}>
+                  Blob: {debugInfo.backendStatus.config?.blobConfigured ? 'configured' : 'missing'}
+                </Text>
+                <Text style={[styles.debugInfoText, { color: colors.primaryText }]}>
+                  Persistent cache: {debugInfo.backendStatus.config?.persistentCacheConfigured ? 'enabled' : 'disabled'}
+                </Text>
+                <Text style={[styles.debugInfoText, { color: colors.primaryText }]}>
+                  Analytics window: {debugInfo.backendStatus.cache?.analyticsWindow || 'n/a'}
+                </Text>
+                <Text style={[styles.debugInfoText, { color: colors.primaryText }]}>
+                  Requests: {debugInfo.backendStatus.cache?.requests ?? 0}
+                </Text>
+                <Text style={[styles.debugInfoText, { color: colors.primaryText }]}>
+                  Memory hits: {debugInfo.backendStatus.cache?.memoryHitCount ?? 0}
+                </Text>
+                <Text style={[styles.debugInfoText, { color: colors.primaryText }]}>
+                  Persistent hits: {debugInfo.backendStatus.cache?.persistentHitCount ?? 0}
+                </Text>
+                <Text style={[styles.debugInfoText, { color: colors.primaryText }]}>
+                  Misses: {debugInfo.backendStatus.cache?.missCount ?? 0}
+                </Text>
+                <Text style={[styles.debugInfoText, { color: colors.primaryText }]}>
+                  Hit ratio: {formatDebugPercent(debugInfo.backendStatus.cache?.hitRatio)}
+                </Text>
+                <Text style={[styles.debugInfoText, { color: colors.primaryText }]}>
+                  Miss ratio: {formatDebugPercent(debugInfo.backendStatus.cache?.missRatio)}
+                </Text>
+              </View>
+            ) : null}
             {debugInfo.lastSpeech ? (
               <View style={[styles.debugLastSpeechCard, { backgroundColor: colors.softSurface, borderColor: colors.border }]}>
                 <Text style={[styles.settingsLabel, { color: colors.primaryText }]}>Last TTS request</Text>
@@ -2417,6 +2462,15 @@ function formatVoiceCountryLabel(countryCode) {
   }
 
   return countryCode;
+}
+
+function formatDebugPercent(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return '0%';
+  }
+
+  return `${Math.round(numericValue * 100)}%`;
 }
 
 function isPreferredGoogleDebugVoice(voice) {

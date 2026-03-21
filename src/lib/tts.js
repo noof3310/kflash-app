@@ -181,6 +181,40 @@ export async function loadTtsVoices({ provider }) {
   };
 }
 
+export async function loadTtsBackendStatus({ provider }) {
+  const providerStatus = getTtsProviderStatus(provider);
+
+  if (provider === TTS_PROVIDER_GOOGLE && providerStatus.configured) {
+    const response = await fetch(`${GOOGLE_TTS_PROXY_BASE_URL}/health`);
+    if (!response.ok) {
+      throw new Error(`TTS backend status request failed with ${response.status}`);
+    }
+
+    const payload = await response.json();
+    return payload?.googleTts || null;
+  }
+
+  return {
+    ok: false,
+    provider,
+    config: {
+      googleCredentialsConfigured: false,
+      redisConfigured: false,
+      blobConfigured: false,
+      persistentCacheConfigured: false,
+    },
+    cache: {
+      analyticsWindow: '',
+      requests: 0,
+      memoryHitCount: 0,
+      persistentHitCount: 0,
+      missCount: 0,
+      hitRatio: 0,
+      missRatio: 0,
+    },
+  };
+}
+
 export async function speakWithTts({ text, language, pitch, provider, rate, voice }) {
   if (provider === TTS_PROVIDER_GOOGLE && GOOGLE_TTS_PROXY_BASE_URL) {
     try {

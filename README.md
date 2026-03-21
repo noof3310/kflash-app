@@ -125,6 +125,25 @@ Or split fields:
 - `GOOGLE_SERVICE_ACCOUNT_EMAIL`
 - `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`
 
+Optional persistent TTS cache on Vercel:
+
+- `UPSTASH_REDIS_REST_KV_REST_API_URL`
+- `UPSTASH_REDIS_REST_KV_REST_API_TOKEN`
+- `BLOB_READ_WRITE_TOKEN`
+
+The backend also accepts the older alias names:
+
+- `UPSTASH_REDIS_REST_URL`
+- `UPSTASH_REDIS_REST_TOKEN`
+
+If those three cache env vars are present, `/api/google/speak` will:
+
+- store synthesized MP3 files in Vercel Blob
+- store cache metadata in Upstash Redis
+- reuse cached audio across deploys and serverless instances
+
+If they are missing, the app still works and falls back to in-memory cache only.
+
 If you use the split private key env var, keep the newline escapes as `\n`.
 
 ### App environment variables
@@ -160,6 +179,7 @@ Required Vercel setup:
 Quick verification after deploy:
 
 - Open `/api/health`
-- It should return JSON like `{ "ok": true, ... }`
+- It should return JSON like `{ "ok": true, "googleTts": { "config": ..., "cache": ... } }`
 - Open `/api/google/voices`
 - If credentials are configured correctly, it should return JSON instead of your app HTML
+- In the app debug screen, repeat the same Google TTS request twice and check whether `Server cache` changes to `persistent-hit`
