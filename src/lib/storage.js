@@ -448,6 +448,7 @@ export function createWebStorage() {
         rate: Number(store.appSettings.tts_rate) || defaults.rate,
         pitch: Number(store.appSettings.tts_pitch) || defaults.pitch,
         theme: store.appSettings.theme || defaults.theme,
+        voice: store.appSettings.tts_voice || defaults.voice,
       };
     },
 

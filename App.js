@@ -45,6 +45,7 @@ const TTS_RATE_OPTIONS = [0.3, 0.6, 0.9];
 const TTS_PITCH_OPTIONS = [0.8, 1.0, 1.2];
 const DEFAULT_TTS_RATE = 0.9;
 const DEFAULT_TTS_PITCH = 1.0;
+const DEFAULT_TTS_VOICE = '';
 const DEFAULT_THEME = 'light';
 const QUIZ_FEEDBACK_DELAY_MS = 900;
 const QUIZ_CORRECT_SOUND_DURATION_MS = 600;
@@ -60,6 +61,8 @@ const QUIZ_DIRECTION_OPTIONS = [
   { value: 'front-to-back', label: 'Front -> Back' },
   { value: 'back-to-front', label: 'Back -> Front' },
 ];
+const DEBUG_UNLOCK_TAP_COUNT = 7;
+const DEBUG_UNLOCK_WINDOW_MS = 1800;
 const EXAMPLE_CSV_TEXT = `front,type,back,set
 은 / 는,marker,topic marker,Example
 가다,v.,ไป,Example
@@ -182,11 +185,20 @@ function AppShell({ storage }) {
   const [showAllSets, setShowAllSets] = useState(false);
   const [ttsRate, setTtsRate] = useState(DEFAULT_TTS_RATE);
   const [ttsPitch, setTtsPitch] = useState(DEFAULT_TTS_PITCH);
+  const [ttsVoice, setTtsVoice] = useState(DEFAULT_TTS_VOICE);
   const [theme, setTheme] = useState(DEFAULT_THEME);
   const [reviewScreenKey, setReviewScreenKey] = useState(0);
+  const [debugCountryFilter, setDebugCountryFilter] = useState('all');
+  const [debugInfo, setDebugInfo] = useState({
+    loading: false,
+    error: '',
+    voices: [],
+  });
   const feedbackTimeoutRef = useRef(null);
   const feedbackSoundRequestRef = useRef(0);
   const nextPromptAutoplayDelayRef = useRef(0);
+  const debugUnlockTapCountRef = useRef(0);
+  const debugUnlockTimerRef = useRef(null);
   const reviewScrollRef = useRef(null);
   const screenOpacity = useRef(new Animated.Value(0)).current;
   const screenTranslateY = useRef(new Animated.Value(18)).current;
@@ -204,6 +216,25 @@ function AppShell({ storage }) {
     setCards(dashboardData.cards ?? []);
   }, [storage]);
 
+  const loadDebugInfo = useCallback(async () => {
+    setDebugInfo((prev) => ({ ...prev, loading: true, error: '' }));
+
+    try {
+      const voices = await Speech.getAvailableVoicesAsync();
+      setDebugInfo({
+        loading: false,
+        error: '',
+        voices: Array.isArray(voices) ? voices : [],
+      });
+    } catch (error) {
+      setDebugInfo({
+        loading: false,
+        error: error?.message ?? 'Could not load available voices.',
+        voices: [],
+      });
+    }
+  }, []);
+
   useEffect(() => {
     refreshAll();
   }, [refreshAll]);
@@ -212,13 +243,23 @@ function AppShell({ storage }) {
     storage.loadAppSettings({
       rate: DEFAULT_TTS_RATE,
       pitch: DEFAULT_TTS_PITCH,
+      voice: DEFAULT_TTS_VOICE,
       theme: DEFAULT_THEME,
     }).then((settings) => {
       setTtsRate(settings.rate);
       setTtsPitch(settings.pitch);
+      setTtsVoice(settings.voice || DEFAULT_TTS_VOICE);
       setTheme(settings.theme);
     });
   }, [storage]);
+
+  useEffect(() => {
+    return () => {
+      if (debugUnlockTimerRef.current) {
+        clearTimeout(debugUnlockTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -328,6 +369,31 @@ function AppShell({ storage }) {
       ),
     [selectedSets]
   );
+  const debugCountryOptions = useMemo(() => {
+    const countryCodes = Array.from(
+      new Set(
+        (debugInfo.voices ?? [])
+          .map((voice) => getVoiceCountryCode(voice))
+          .filter(Boolean)
+      )
+    ).sort((left, right) => left.localeCompare(right));
+
+    return [{ value: 'all', label: 'All countries' }].concat(
+      countryCodes.map((code) => ({
+        value: code,
+        label: formatVoiceCountryLabel(code),
+      }))
+    );
+  }, [debugInfo.voices]);
+  const filteredDebugVoices = useMemo(() => {
+    if (debugCountryFilter === 'all') {
+      return debugInfo.voices;
+    }
+
+    return (debugInfo.voices ?? []).filter(
+      (voice) => getVoiceCountryCode(voice) === debugCountryFilter
+    );
+  }, [debugCountryFilter, debugInfo.voices]);
   const reviewSummary = useMemo(
     () => ({
       newCount: reviewCards.filter((item) => (Number(item.attempt_count) || 0) === 0).length,
@@ -456,6 +522,27 @@ function AppShell({ storage }) {
       }
     };
   }, [colors.screenBackground, isDarkMode]);
+
+  useEffect(() => {
+    if (screen !== 'debug') {
+      return undefined;
+    }
+
+    loadDebugInfo();
+    return undefined;
+  }, [loadDebugInfo, screen]);
+
+  useEffect(() => {
+    if (debugCountryFilter === 'all') {
+      return undefined;
+    }
+
+    if (!debugCountryOptions.some((option) => option.value === debugCountryFilter)) {
+      setDebugCountryFilter('all');
+    }
+
+    return undefined;
+  }, [debugCountryFilter, debugCountryOptions]);
   const animatedScreenStyle = {
     opacity: screenOpacity,
     transform: [{ translateY: screenTranslateY }],
@@ -803,16 +890,52 @@ function AppShell({ storage }) {
     );
   };
 
-  const speakFrontText = (text) => {
-    const language = getSpeechLanguage(text);
+  const speakText = useCallback(
+    (text, overrides = {}) => {
+      const language = overrides.language ?? getSpeechLanguage(text);
 
-    Speech.stop();
-    Speech.speak(text, {
-      rate: ttsRate,
-      pitch: ttsPitch,
-      language,
-    });
-  };
+      Speech.stop();
+      Speech.speak(text, {
+        rate: overrides.rate ?? ttsRate,
+        pitch: overrides.pitch ?? ttsPitch,
+        language,
+        voice: (overrides.voice ?? ttsVoice) || undefined,
+      });
+    },
+    [ttsPitch, ttsRate, ttsVoice]
+  );
+
+  const speakFrontText = useCallback(
+    (text) => {
+      speakText(text);
+    },
+    [speakText]
+  );
+
+  const previewVoice = useCallback(
+    (voice) => {
+      const language = String(voice?.language || voice?.lang || '').toLowerCase();
+      let sampleText = 'Flash card preview';
+
+      if (language.startsWith('ko')) {
+        sampleText = findSpeechPreviewText(cards);
+      } else if (language.startsWith('th')) {
+        sampleText = 'สวัสดี นี่คือเสียงตัวอย่าง';
+      } else if (language.startsWith('ja')) {
+        sampleText = 'こんにちは これはサンプルです';
+      } else if (language.startsWith('zh')) {
+        sampleText = '你好 这是示例语音';
+      } else if (language.startsWith('es')) {
+        sampleText = 'Hola, esta es una voz de muestra';
+      }
+
+      speakText(sampleText, {
+        language: voice?.language || voice?.lang || undefined,
+        voice: voice?.identifier || voice?.voiceURI || undefined,
+      });
+    },
+    [cards, speakText]
+  );
 
   const playFeedbackSound = async (isCorrect) => {
     const requestId = feedbackSoundRequestRef.current + 1;
@@ -928,6 +1051,7 @@ function AppShell({ storage }) {
           setTheme(DEFAULT_THEME);
           setTtsRate(DEFAULT_TTS_RATE);
           setTtsPitch(DEFAULT_TTS_PITCH);
+          setTtsVoice(DEFAULT_TTS_VOICE);
           setScreen('home');
           await refreshAll();
           showAlert('Schema reset', 'The local database has been rebuilt.');
@@ -989,6 +1113,24 @@ function AppShell({ storage }) {
     setReviewScreenKey((prev) => prev + 1);
     setScreen('review');
   }, [loadDistractorBiasMap, loadSelectedCards, refreshAll, selectedSetIds.length]);
+
+  const handleDebugUnlockTap = useCallback(() => {
+    debugUnlockTapCountRef.current += 1;
+
+    if (debugUnlockTimerRef.current) {
+      clearTimeout(debugUnlockTimerRef.current);
+    }
+
+    if (debugUnlockTapCountRef.current >= DEBUG_UNLOCK_TAP_COUNT) {
+      debugUnlockTapCountRef.current = 0;
+      setScreen('debug');
+      return;
+    }
+
+    debugUnlockTimerRef.current = setTimeout(() => {
+      debugUnlockTapCountRef.current = 0;
+    }, DEBUG_UNLOCK_WINDOW_MS);
+  }, []);
 
   if (screen === 'review') {
     return (
@@ -1392,6 +1534,191 @@ function AppShell({ storage }) {
     );
   }
 
+  if (screen === 'debug') {
+    return (
+      <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.screenBackground }]}>
+        <StatusBar style={statusBarStyle} />
+        <AnimatedScrollView
+          style={animatedScreenStyle}
+          contentContainerStyle={styles.container}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.quizHeaderRow}>
+            <Pressable
+              style={[styles.secondaryButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+              onPress={goHome}
+            >
+              <Text style={[styles.secondaryButtonText, { color: colors.primaryText }]}>Back</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.secondaryButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+              onPress={loadDebugInfo}
+            >
+              <Text style={[styles.secondaryButtonText, { color: colors.primaryText }]}>Refresh</Text>
+            </Pressable>
+          </View>
+
+          <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>Speech debug</Text>
+            <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
+              Hidden screen for checking what TTS voices the current browser or device exposes to the app.
+            </Text>
+            <View style={styles.debugInfoList}>
+              <Text style={[styles.debugInfoText, { color: colors.primaryText }]}>Platform: {Platform.OS}</Text>
+              <Text style={[styles.debugInfoText, { color: colors.primaryText }]}>Theme: {theme}</Text>
+              <Text style={[styles.debugInfoText, { color: colors.primaryText }]}>TTS rate: {ttsRate}</Text>
+              <Text style={[styles.debugInfoText, { color: colors.primaryText }]}>TTS pitch: {ttsPitch}</Text>
+              <Text style={[styles.debugInfoText, { color: colors.primaryText }]}>
+                Selected voice: {ttsVoice || 'System default'}
+              </Text>
+              <Text style={[styles.debugInfoText, { color: colors.primaryText }]}>
+                Voices shown: {filteredDebugVoices.length} / {debugInfo.voices.length}
+              </Text>
+              {Platform.OS === 'web' && typeof navigator !== 'undefined' ? (
+                <Text style={[styles.debugInfoText, styles.debugInfoMono, { color: colors.secondaryText }]}>
+                  UA: {navigator.userAgent}
+                </Text>
+              ) : null}
+            </View>
+          </View>
+
+          {debugInfo.loading ? (
+            <Text style={[styles.mutedText, { color: colors.secondaryText }]}>Loading voices...</Text>
+          ) : null}
+          {debugInfo.error ? (
+            <View style={[styles.sectionCard, { backgroundColor: colors.errorBackground, borderColor: colors.errorBorder }]}>
+              <Text style={[styles.feedbackTitle, { color: colors.errorText }]}>Voice load failed</Text>
+              <Text style={[styles.mutedText, { color: colors.primaryText }]}>{debugInfo.error}</Text>
+            </View>
+          ) : null}
+
+          <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>Available voices</Text>
+            <View style={styles.sortSection}>
+              <Text style={[styles.settingsLabel, { color: colors.primaryText }]}>Filter by country</Text>
+              <View style={styles.filterRow}>
+                {debugCountryOptions.map((option) => {
+                  const active = debugCountryFilter === option.value;
+                  return (
+                    <Pressable
+                      key={option.value}
+                      style={[
+                        styles.filterChip,
+                        { backgroundColor: colors.softSurface, borderColor: colors.border },
+                        active && { backgroundColor: colors.primaryText, borderColor: colors.primaryText },
+                      ]}
+                      onPress={() => setDebugCountryFilter(option.value)}
+                    >
+                      <Text style={[styles.filterChipText, { color: active ? colors.surface : colors.primaryText }]}>
+                        {option.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+            <Pressable
+              style={[
+                styles.secondaryButton,
+                styles.debugVoiceActionButton,
+                {
+                  backgroundColor: !ttsVoice ? colors.primaryButton : colors.surface,
+                  borderColor: !ttsVoice ? colors.primaryButton : colors.border,
+                },
+              ]}
+              onPress={() => updateSpeechSetting('tts_voice', DEFAULT_TTS_VOICE, setTtsVoice)}
+            >
+              <Text
+                style={[
+                  styles.secondaryButtonText,
+                  { color: !ttsVoice ? colors.primaryButtonText : colors.primaryText },
+                ]}
+              >
+                Use system default voice
+              </Text>
+            </Pressable>
+            {filteredDebugVoices.length === 0 && !debugInfo.loading ? (
+              <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
+                {debugInfo.voices.length === 0
+                  ? 'No voices reported by this environment.'
+                  : 'No voices match the selected country filter.'}
+              </Text>
+            ) : (
+              filteredDebugVoices.map((voice, index) => (
+                <View
+                  key={`${voice.identifier ?? voice.voiceURI ?? voice.name ?? 'voice'}-${index}`}
+                  style={[
+                    styles.debugVoiceRow,
+                    { backgroundColor: colors.elevatedSurface, borderColor: colors.border },
+                  ]}
+                >
+                  <Text style={[styles.debugVoiceName, { color: colors.primaryText }]}>
+                    {voice.name || voice.identifier || `Voice ${index + 1}`}
+                  </Text>
+                  <Text style={[styles.debugVoiceMeta, { color: colors.secondaryText }]}>
+                    {(voice.language || voice.lang || 'unknown language') +
+                      ' • ' +
+                      (voice.identifier || voice.voiceURI || 'no id')}
+                  </Text>
+                  <Text style={[styles.debugVoiceMeta, styles.debugInfoMono, { color: colors.secondaryText }]}>
+                    {`default=${String(Boolean(voice.isDefault))} • local=${String(
+                      voice.localService ?? true
+                    )} • quality=${voice.quality ?? 'n/a'}`}
+                  </Text>
+                  <View style={styles.debugVoiceActionsRow}>
+                    <Pressable
+                      style={[
+                        styles.secondaryButton,
+                        styles.debugVoiceActionButton,
+                        { backgroundColor: colors.surface, borderColor: colors.border },
+                      ]}
+                      onPress={() => previewVoice(voice)}
+                    >
+                      <Text style={[styles.secondaryButtonText, { color: colors.primaryText }]}>Preview voice</Text>
+                    </Pressable>
+                    <Pressable
+                      style={[
+                        styles.secondaryButton,
+                        styles.debugVoiceActionButton,
+                        {
+                          backgroundColor:
+                            ttsVoice === (voice.identifier || voice.voiceURI || '') ? colors.primaryButton : colors.surface,
+                          borderColor:
+                            ttsVoice === (voice.identifier || voice.voiceURI || '') ? colors.primaryButton : colors.border,
+                        },
+                      ]}
+                      onPress={() =>
+                        updateSpeechSetting(
+                          'tts_voice',
+                          voice.identifier || voice.voiceURI || '',
+                          setTtsVoice
+                        )
+                      }
+                    >
+                      <Text
+                        style={[
+                          styles.secondaryButtonText,
+                          {
+                            color:
+                              ttsVoice === (voice.identifier || voice.voiceURI || '')
+                                ? colors.primaryButtonText
+                                : colors.primaryText,
+                          },
+                        ]}
+                      >
+                        {ttsVoice === (voice.identifier || voice.voiceURI || '') ? 'Selected voice' : 'Use this voice'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ))
+            )}
+          </View>
+        </AnimatedScrollView>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.screenBackground }]}>
       <StatusBar style={statusBarStyle} />
@@ -1403,9 +1730,12 @@ function AppShell({ storage }) {
       <Animated.View style={[styles.heroCard, animatedHeroStyle, { backgroundColor: colors.heroSurface, borderColor: colors.heroBorder }]}>
         <View style={[styles.heroOrb, styles.heroOrbLarge, { backgroundColor: colors.heroBadgeBackground }]} />
         <View style={[styles.heroOrb, styles.heroOrbSmall, { backgroundColor: colors.softAccent }]} />
-        <View style={[styles.heroBadge, { backgroundColor: colors.heroBadgeBackground }]}>
+        <Pressable
+          style={[styles.heroBadge, { backgroundColor: colors.heroBadgeBackground }]}
+          onPress={handleDebugUnlockTap}
+        >
           <Text style={[styles.heroBadgeText, { color: colors.heroBadgeText }]}>Study Flow</Text>
-        </View>
+        </Pressable>
         <Text style={[styles.title, { color: colors.primaryText }]}>Flash Cards</Text>
         <Text style={[styles.subtitle, { color: colors.secondaryText }]}>
           Build soft little study decks, review what matters, and let the quiz adapt as you learn.
@@ -1934,6 +2264,31 @@ function normalizeImportedLearningProgressRows(rawRows) {
     .filter((row) => row.front && row.type && row.back);
 }
 
+function getVoiceCountryCode(voice) {
+  const language = String(voice?.language || voice?.lang || '').trim();
+  if (!language) {
+    return '';
+  }
+
+  const [, region = ''] = language.split(/[-_]/);
+  return region.toUpperCase();
+}
+
+function formatVoiceCountryLabel(countryCode) {
+  if (!countryCode) {
+    return 'Unknown country';
+  }
+
+  if (typeof Intl !== 'undefined' && typeof Intl.DisplayNames === 'function') {
+    try {
+      const displayNames = new Intl.DisplayNames(['en'], { type: 'region' });
+      return displayNames.of(countryCode) || countryCode;
+    } catch {}
+  }
+
+  return countryCode;
+}
+
 function showAlert(title, message) {
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
     window.alert([title, message].filter(Boolean).join('\n\n'));
@@ -2068,6 +2423,46 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     letterSpacing: 0.3,
+  },
+  debugInfoList: {
+    gap: 6,
+  },
+  debugInfoText: {
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  debugInfoMono: {
+    fontFamily: Platform.select({
+      ios: 'Menlo',
+      android: 'monospace',
+      default: 'monospace',
+    }),
+    fontSize: 12,
+  },
+  debugVoiceRow: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 12,
+    gap: 4,
+  },
+  debugVoiceName: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  debugVoiceMeta: {
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  debugVoiceActionButton: {
+    alignSelf: 'flex-start',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginTop: 4,
+  },
+  debugVoiceActionsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
   },
   summaryPillRow: {
     flexDirection: 'row',

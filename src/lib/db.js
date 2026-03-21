@@ -121,8 +121,8 @@ export async function saveQuizSession(db, selectedSetIds, answers) {
 
 export async function loadAppSettings(db, defaults) {
   const rows = await db.getAllAsync(
-    'SELECT key, value FROM app_settings WHERE key IN (?, ?, ?)',
-    ['tts_rate', 'tts_pitch', 'theme']
+    'SELECT key, value FROM app_settings WHERE key IN (?, ?, ?, ?)',
+    ['tts_rate', 'tts_pitch', 'theme', 'tts_voice']
   );
 
   const settingsMap = Object.fromEntries((rows ?? []).map((row) => [row.key, row.value]));
@@ -131,6 +131,7 @@ export async function loadAppSettings(db, defaults) {
     rate: Number(settingsMap.tts_rate) || defaults.rate,
     pitch: Number(settingsMap.tts_pitch) || defaults.pitch,
     theme: settingsMap.theme || defaults.theme,
+    voice: settingsMap.tts_voice || defaults.voice,
   };
 }
 
