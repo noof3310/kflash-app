@@ -23,10 +23,12 @@ export default async function handler(req, res) {
       return;
     }
 
-    const payload = await synthesizeGoogleSpeech(body);
+    const result = await synthesizeGoogleSpeech(body);
+    const payload = result?.payload || {};
     sendJson(res, 200, {
       audioContent: payload.audioContent || '',
       contentType: 'audio/mpeg',
+      cache: result?.cache || { server: 'unknown' },
     });
   } catch (error) {
     sendJson(res, 500, {

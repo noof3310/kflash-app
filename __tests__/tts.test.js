@@ -8,9 +8,11 @@ jest.mock('../src/lib/audio', () => ({
 }));
 
 import {
+  buildGoogleTtsCacheKey,
   buildGoogleTtsRequest,
   getTtsProviderStatus,
   normalizeGoogleVoiceRows,
+  pickBestGoogleVoice,
   TTS_PROVIDER_GOOGLE,
   TTS_PROVIDER_SYSTEM,
 } from '../src/lib/tts';
@@ -39,27 +41,50 @@ describe('tts helpers', () => {
     });
   });
 
+  test('buildGoogleTtsCacheKey is stable for the same request payload', () => {
+    expect(
+      buildGoogleTtsCacheKey({
+        text: '안녕하세요',
+        language: 'ko-KR',
+        voice: 'ko-KR-Wavenet-B',
+        rate: 0.9,
+        pitch: 1,
+      })
+    ).toBe(
+      buildGoogleTtsCacheKey({
+        text: '안녕하세요',
+        language: 'ko-KR',
+        voice: 'ko-KR-Wavenet-B',
+        rate: 0.9,
+        pitch: 1,
+      })
+    );
+  });
+
   test('normalizeGoogleVoiceRows accepts google-style voice rows', () => {
     expect(
       normalizeGoogleVoiceRows({
         voices: [
           {
-            name: 'ko-KR-Neural2-A',
-            languageCode: 'ko-KR',
+            name: 'ko-KR-Wavenet-A',
+            languageCodes: ['ko-KR'],
             ssmlGender: 'FEMALE',
           },
         ],
       })
     ).toEqual([
       {
-        identifier: 'ko-KR-Neural2-A',
-        name: 'ko-KR-Neural2-A',
+        identifier: 'ko-KR-Wavenet-A',
+        name: 'ko-KR-Wavenet-A',
         language: 'ko-KR',
-        quality: 'FEMALE',
+        languageCodes: ['ko-KR'],
+        gender: 'FEMALE',
+        quality: 'WaveNet',
+        family: 'WaveNet',
         localService: false,
         isDefault: false,
         provider: TTS_PROVIDER_GOOGLE,
-        voiceURI: 'ko-KR-Neural2-A',
+        voiceURI: 'ko-KR-Wavenet-A',
       },
     ]);
   });
@@ -70,6 +95,43 @@ describe('tts helpers', () => {
       configured: true,
       effectiveProvider: TTS_PROVIDER_SYSTEM,
       message: 'Using device system TTS.',
+    });
+  });
+
+  test('pickBestGoogleVoice prefers exact locale, WaveNet, then male voice', () => {
+    expect(
+      pickBestGoogleVoice(
+        [
+          {
+            identifier: 'ko-KR-Standard-B',
+            name: 'ko-KR-Standard-B',
+            language: 'ko-KR',
+            languageCodes: ['ko-KR'],
+            family: 'Standard',
+            gender: 'MALE',
+          },
+          {
+            identifier: 'ko-KR-Wavenet-A',
+            name: 'ko-KR-Wavenet-A',
+            language: 'ko-KR',
+            languageCodes: ['ko-KR'],
+            family: 'WaveNet',
+            gender: 'FEMALE',
+          },
+          {
+            identifier: 'ko-KR-Wavenet-B',
+            name: 'ko-KR-Wavenet-B',
+            language: 'ko-KR',
+            languageCodes: ['ko-KR'],
+            family: 'WaveNet',
+            gender: 'MALE',
+          },
+        ],
+        'ko-KR',
+        'MALE'
+      )
+    ).toMatchObject({
+      identifier: 'ko-KR-Wavenet-B',
     });
   });
 });

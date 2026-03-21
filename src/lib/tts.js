@@ -19,7 +19,9 @@ const GOOGLE_TTS_PROXY_BASE_URL = (
 ).replace(/\/$/, '');
 
 let googlePlayer = null;
-let nativeGoogleAudioUri = null;
+let cachedGoogleVoices = null;
+const googleSpeechPayloadCache = new Map();
+const googleAudioSourceCache = new Map();
 
 export function getTtsProviderStatus(provider) {
   if (provider === TTS_PROVIDER_GOOGLE) {
@@ -63,6 +65,18 @@ export function buildGoogleTtsRequest({ text, language, voice, rate, pitch }) {
   };
 }
 
+export function buildGoogleTtsCacheKey({ text, language, voice, rate, pitch }) {
+  return hashString(
+    JSON.stringify({
+      text: String(text || ''),
+      language: String(language || ''),
+      voice: String(voice || ''),
+      rate: Number.isFinite(rate) ? rate : '',
+      pitch: Number.isFinite(pitch) ? pitch : '',
+    })
+  );
+}
+
 export function normalizeGoogleVoiceRows(payload) {
   const voiceRows = Array.isArray(payload)
     ? payload
@@ -71,17 +85,67 @@ export function normalizeGoogleVoiceRows(payload) {
       : [];
 
   return voiceRows
-    .map((voice) => ({
-      identifier: voice.identifier || voice.name || voice.voiceURI || '',
-      name: voice.name || voice.identifier || voice.voiceURI || 'Google voice',
-      language: voice.language || voice.languageCode || voice.lang || voice.locale || '',
-      quality: voice.quality || voice.ssmlGender || voice.gender || 'Google',
-      localService: false,
-      isDefault: Boolean(voice.isDefault),
-      provider: TTS_PROVIDER_GOOGLE,
-      voiceURI: voice.voiceURI || voice.identifier || voice.name || '',
-    }))
+    .map((voice) => {
+      const languageCodes = normalizeVoiceLanguageCodes(voice);
+      const family = getGoogleVoiceFamily(voice);
+
+      return {
+        identifier: voice.identifier || voice.name || voice.voiceURI || '',
+        name: voice.name || voice.identifier || voice.voiceURI || 'Google voice',
+        language: languageCodes[0] || '',
+        languageCodes,
+        gender: normalizeVoiceGender(voice),
+        quality: family || voice.quality || voice.ssmlGender || voice.gender || 'Google',
+        family: family || '',
+        localService: false,
+        isDefault: Boolean(voice.isDefault),
+        provider: TTS_PROVIDER_GOOGLE,
+        voiceURI: voice.voiceURI || voice.identifier || voice.name || '',
+      };
+    })
     .filter((voice) => voice.identifier || voice.name);
+}
+
+export function pickBestGoogleVoice(voices, language, preferredGender = 'MALE') {
+  const normalizedVoices = Array.isArray(voices) ? voices.filter(Boolean) : [];
+  if (normalizedVoices.length === 0) {
+    return null;
+  }
+
+  const normalizedLanguage = String(language || '').trim();
+  const normalizedLanguagePrefix = normalizedLanguage.split(/[-_]/)[0]?.toLowerCase() || '';
+  const normalizedPreferredGender = String(preferredGender || '').trim().toUpperCase() || 'MALE';
+
+  const exactMatches = normalizedLanguage
+    ? normalizedVoices.filter((voice) =>
+        getAllVoiceLanguageCodes(voice).some((code) => code.toLowerCase() === normalizedLanguage.toLowerCase())
+      )
+    : [];
+  const prefixMatches =
+    exactMatches.length > 0 || !normalizedLanguagePrefix
+      ? []
+      : normalizedVoices.filter((voice) =>
+          getAllVoiceLanguageCodes(voice).some(
+            (code) => code.split(/[-_]/)[0]?.toLowerCase() === normalizedLanguagePrefix
+          )
+        );
+
+  const candidatePool =
+    exactMatches.length > 0 ? exactMatches : prefixMatches.length > 0 ? prefixMatches : normalizedVoices;
+
+  return [...candidatePool].sort((left, right) => {
+    const familyComparison = compareVoiceFamily(left, right);
+    if (familyComparison !== 0) {
+      return familyComparison;
+    }
+
+    const genderComparison = compareVoiceGender(left, right, normalizedPreferredGender);
+    if (genderComparison !== 0) {
+      return genderComparison;
+    }
+
+    return String(left.name || left.identifier || '').localeCompare(String(right.name || right.identifier || ''));
+  })[0] || null;
 }
 
 export async function loadTtsVoices({ provider }) {
@@ -89,14 +153,9 @@ export async function loadTtsVoices({ provider }) {
 
   if (provider === TTS_PROVIDER_GOOGLE && providerStatus.configured) {
     try {
-      const response = await fetch(`${GOOGLE_TTS_PROXY_BASE_URL}/google/voices`);
-      if (!response.ok) {
-        throw new Error(`Voice list request failed with ${response.status}`);
-      }
-
-      const payload = await response.json();
+      const payload = await fetchGoogleVoices();
       return {
-        voices: normalizeGoogleVoiceRows(payload),
+        voices: payload,
         provider,
         effectiveProvider: TTS_PROVIDER_GOOGLE,
         fallback: false,
@@ -126,26 +185,26 @@ export async function speakWithTts({ text, language, pitch, provider, rate, voic
   if (provider === TTS_PROVIDER_GOOGLE && GOOGLE_TTS_PROXY_BASE_URL) {
     try {
       await stopTtsPlayback();
-      const response = await fetch(`${GOOGLE_TTS_PROXY_BASE_URL}/google/speak`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(
-          buildGoogleTtsRequest({
-            text,
-            language,
-            voice,
-            rate,
-            pitch,
-          })
-        ),
+      const selectedVoice =
+        voice || (await getAutoSelectedGoogleVoiceName({ language, preferredGender: 'MALE' })) || undefined;
+      const selectedLanguage =
+        language || (await getAutoSelectedGoogleVoiceLanguage({ voiceName: selectedVoice })) || undefined;
+      const requestPayload = buildGoogleTtsRequest({
+        text,
+        language: selectedLanguage,
+        voice: selectedVoice,
+        rate,
+        pitch,
       });
-
-      if (!response.ok) {
-        throw new Error(`Google TTS request failed with ${response.status}`);
-      }
-
-      const payload = await response.json();
-      const audioSource = await resolveGoogleAudioSource(payload);
+      const cacheKey = buildGoogleTtsCacheKey({
+        text,
+        language: selectedLanguage,
+        voice: selectedVoice,
+        rate,
+        pitch,
+      });
+      const payload = await fetchGoogleSpeechPayload(requestPayload, cacheKey);
+      const audioSource = await resolveGoogleAudioSource(payload, cacheKey);
       if (!audioSource) {
         throw new Error('Google TTS proxy did not return usable audio.');
       }
@@ -160,6 +219,12 @@ export async function speakWithTts({ text, language, pitch, provider, rate, voic
         effectiveProvider: TTS_PROVIDER_GOOGLE,
         fallback: false,
         message: 'Spoken with Google TTS.',
+        cache: {
+          client: payload._clientCache || 'unknown',
+          server: payload.cache?.server || 'unknown',
+        },
+        selectedVoice: selectedVoice || '',
+        selectedLanguage: selectedLanguage || '',
       };
     } catch (error) {
       await speakWithSystemTts({ text, language, pitch, rate, voice });
@@ -168,6 +233,12 @@ export async function speakWithTts({ text, language, pitch, provider, rate, voic
         effectiveProvider: TTS_PROVIDER_SYSTEM,
         fallback: true,
         message: error?.message || 'Google TTS failed. Fell back to system TTS.',
+        cache: {
+          client: 'miss',
+          server: 'unknown',
+        },
+        selectedVoice: voice || '',
+        selectedLanguage: language || '',
       };
     }
   }
@@ -178,6 +249,12 @@ export async function speakWithTts({ text, language, pitch, provider, rate, voic
     effectiveProvider: TTS_PROVIDER_SYSTEM,
     fallback: provider === TTS_PROVIDER_GOOGLE,
     message: getTtsProviderStatus(provider).message,
+    cache: {
+      client: 'n/a',
+      server: 'n/a',
+    },
+    selectedVoice: voice || '',
+    selectedLanguage: language || '',
   };
 }
 
@@ -200,7 +277,6 @@ export async function stopTtsPlayback() {
   }
 
   googlePlayer = null;
-  await cleanupNativeGoogleAudioUri();
 }
 
 async function listSystemVoices() {
@@ -222,9 +298,16 @@ async function speakWithSystemTts({ text, language, pitch, rate, voice }) {
   });
 }
 
-async function resolveGoogleAudioSource(payload) {
+async function resolveGoogleAudioSource(payload, cacheKey) {
+  if (cacheKey && googleAudioSourceCache.has(cacheKey)) {
+    return googleAudioSourceCache.get(cacheKey);
+  }
+
   const audioUrl = payload.audioUrl || payload.audio_url || payload.url || '';
   if (audioUrl) {
+    if (cacheKey) {
+      googleAudioSourceCache.set(cacheKey, audioUrl);
+    }
     return audioUrl;
   }
 
@@ -236,7 +319,11 @@ async function resolveGoogleAudioSource(payload) {
   const contentType = payload.contentType || payload.content_type || 'audio/mpeg';
 
   if (Platform.OS === 'web') {
-    return `data:${contentType};base64,${audioContent}`;
+    const dataUri = `data:${contentType};base64,${audioContent}`;
+    if (cacheKey) {
+      googleAudioSourceCache.set(cacheKey, dataUri);
+    }
+    return dataUri;
   }
 
   const outputDirectory = FileSystem.cacheDirectory || FileSystem.documentDirectory;
@@ -244,27 +331,172 @@ async function resolveGoogleAudioSource(payload) {
     return null;
   }
 
-  await cleanupNativeGoogleAudioUri();
-  nativeGoogleAudioUri = `${outputDirectory}google-tts-${Date.now()}.mp3`;
-  await FileSystem.writeAsStringAsync(nativeGoogleAudioUri, audioContent, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
-
-  return nativeGoogleAudioUri;
-}
-
-async function cleanupNativeGoogleAudioUri() {
-  if (!nativeGoogleAudioUri || Platform.OS === 'web') {
-    nativeGoogleAudioUri = null;
-    return;
+  const fileUri = `${outputDirectory}google-tts-${cacheKey || hashString(audioContent)}.mp3`;
+  const info = await FileSystem.getInfoAsync(fileUri);
+  if (!info.exists) {
+    await FileSystem.writeAsStringAsync(fileUri, audioContent, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
   }
 
-  try {
-    const info = await FileSystem.getInfoAsync(nativeGoogleAudioUri);
-    if (info.exists) {
-      await FileSystem.deleteAsync(nativeGoogleAudioUri, { idempotent: true });
-    }
-  } catch {}
+  if (cacheKey) {
+    googleAudioSourceCache.set(cacheKey, fileUri);
+  }
 
-  nativeGoogleAudioUri = null;
+  return fileUri;
+}
+
+function normalizeVoiceLanguageCodes(voice) {
+  if (Array.isArray(voice?.languageCodes) && voice.languageCodes.length > 0) {
+    return voice.languageCodes.map((item) => String(item || '').trim()).filter(Boolean);
+  }
+
+  const fallback = voice?.language || voice?.languageCode || voice?.lang || voice?.locale || '';
+  return fallback ? [String(fallback).trim()] : [];
+}
+
+function getGoogleVoiceFamily(voice) {
+  const name = String(voice?.name || voice?.identifier || voice?.voiceURI || '');
+
+  if (/wavenet/i.test(name)) {
+    return 'WaveNet';
+  }
+
+  if (/standard/i.test(name)) {
+    return 'Standard';
+  }
+
+  if (/neural2/i.test(name)) {
+    return 'Neural2';
+  }
+
+  if (/studio/i.test(name)) {
+    return 'Studio';
+  }
+
+  if (/chirp/i.test(name)) {
+    return 'Chirp';
+  }
+
+  return '';
+}
+
+async function fetchGoogleSpeechPayload(requestPayload, cacheKey) {
+  if (cacheKey && googleSpeechPayloadCache.has(cacheKey)) {
+    return {
+      ...googleSpeechPayloadCache.get(cacheKey),
+      _clientCache: 'hit',
+    };
+  }
+
+  const response = await fetch(`${GOOGLE_TTS_PROXY_BASE_URL}/google/speak`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(requestPayload),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Google TTS request failed with ${response.status}`);
+  }
+
+  const payload = await response.json();
+  if (cacheKey) {
+    googleSpeechPayloadCache.set(cacheKey, payload);
+  }
+  return {
+    ...payload,
+    _clientCache: 'miss',
+  };
+}
+
+function normalizeVoiceGender(voice) {
+  return String(voice?.ssmlGender || voice?.gender || '').trim().toUpperCase();
+}
+
+async function fetchGoogleVoices() {
+  if (cachedGoogleVoices) {
+    return cachedGoogleVoices;
+  }
+
+  const response = await fetch(`${GOOGLE_TTS_PROXY_BASE_URL}/google/voices`);
+  if (!response.ok) {
+    throw new Error(`Voice list request failed with ${response.status}`);
+  }
+
+  const payload = await response.json();
+  cachedGoogleVoices = normalizeGoogleVoiceRows(payload);
+  return cachedGoogleVoices;
+}
+
+async function getAutoSelectedGoogleVoiceName({ language, preferredGender }) {
+  const voices = await fetchGoogleVoices();
+  return pickBestGoogleVoice(voices, language, preferredGender)?.identifier || '';
+}
+
+async function getAutoSelectedGoogleVoiceLanguage({ voiceName }) {
+  if (!voiceName) {
+    return '';
+  }
+
+  const voices = await fetchGoogleVoices();
+  return voices.find((voice) => voice.identifier === voiceName)?.languageCodes?.[0] || '';
+}
+
+function getAllVoiceLanguageCodes(voice) {
+  if (Array.isArray(voice?.languageCodes) && voice.languageCodes.length > 0) {
+    return voice.languageCodes.map((item) => String(item || '').trim()).filter(Boolean);
+  }
+
+  return [String(voice?.language || '').trim()].filter(Boolean);
+}
+
+function compareVoiceFamily(left, right) {
+  return getVoiceFamilyRank(left) - getVoiceFamilyRank(right);
+}
+
+function compareVoiceGender(left, right, preferredGender) {
+  return getVoiceGenderRank(left, preferredGender) - getVoiceGenderRank(right, preferredGender);
+}
+
+function getVoiceFamilyRank(voice) {
+  const family = String(voice?.family || voice?.quality || '').trim();
+
+  if (family === 'WaveNet') {
+    return 0;
+  }
+
+  if (family === 'Standard') {
+    return 1;
+  }
+
+  return 2;
+}
+
+function getVoiceGenderRank(voice, preferredGender) {
+  const gender = String(voice?.gender || '').trim().toUpperCase();
+
+  if (gender === preferredGender) {
+    return 0;
+  }
+
+  if (gender === 'NEUTRAL') {
+    return 1;
+  }
+
+  if (!gender) {
+    return 2;
+  }
+
+  return 3;
+}
+
+function hashString(value) {
+  const input = String(value || '');
+  let hash = 0;
+
+  for (let index = 0; index < input.length; index += 1) {
+    hash = (hash * 31 + input.charCodeAt(index)) >>> 0;
+  }
+
+  return hash.toString(36);
 }

@@ -38,6 +38,7 @@ import {
   getThemeColors,
 } from './src/lib/ui';
 import {
+  TTS_PROVIDER_GOOGLE,
   getTtsProviderStatus,
   loadTtsVoices,
   speakWithTts,
@@ -205,6 +206,7 @@ function AppShell({ storage }) {
     effectiveProvider: DEFAULT_TTS_PROVIDER,
     providerMessage: '',
     fallback: false,
+    lastSpeech: null,
   });
   const feedbackTimeoutRef = useRef(null);
   const feedbackSoundRequestRef = useRef(0);
@@ -233,23 +235,25 @@ function AppShell({ storage }) {
 
     try {
       const voiceResult = await loadTtsVoices({ provider: ttsProvider });
-      setDebugInfo({
+      setDebugInfo((prev) => ({
+        ...prev,
         loading: false,
         error: '',
         voices: Array.isArray(voiceResult.voices) ? voiceResult.voices : [],
         effectiveProvider: voiceResult.effectiveProvider,
         providerMessage: voiceResult.message || '',
         fallback: Boolean(voiceResult.fallback),
-      });
+      }));
     } catch (error) {
-      setDebugInfo({
+      setDebugInfo((prev) => ({
+        ...prev,
         loading: false,
         error: error?.message ?? 'Could not load available voices.',
         voices: [],
         effectiveProvider: getTtsProviderStatus(ttsProvider).effectiveProvider,
         providerMessage: '',
         fallback: false,
-      });
+      }));
     }
   }, [ttsProvider]);
 
@@ -406,13 +410,15 @@ function AppShell({ storage }) {
     );
   }, [debugInfo.voices]);
   const filteredDebugVoices = useMemo(() => {
+    const providerFilteredVoices = (debugInfo.voices ?? []).filter((voice) =>
+      voice?.provider === TTS_PROVIDER_GOOGLE ? isPreferredGoogleDebugVoice(voice) : true
+    );
+
     if (debugCountryFilter === 'all') {
-      return debugInfo.voices;
+      return providerFilteredVoices;
     }
 
-    return (debugInfo.voices ?? []).filter(
-      (voice) => getVoiceCountryCode(voice) === debugCountryFilter
-    );
+    return providerFilteredVoices.filter((voice) => getVoiceCountryCode(voice) === debugCountryFilter);
   }, [debugCountryFilter, debugInfo.voices]);
   const reviewSummary = useMemo(
     () => ({
@@ -488,6 +494,9 @@ function AppShell({ storage }) {
     () => getTtsProviderStatus(ttsProvider),
     [ttsProvider]
   );
+  const usesFixedGoogleTtsSettings = ttsProvider === TTS_PROVIDER_GOOGLE;
+  const effectiveTtsRate = usesFixedGoogleTtsSettings ? DEFAULT_TTS_RATE : ttsRate;
+  const effectiveTtsPitch = usesFixedGoogleTtsSettings ? DEFAULT_TTS_PITCH : ttsPitch;
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') {
@@ -670,7 +679,7 @@ function AppShell({ storage }) {
     }, delayMs);
 
     return () => clearTimeout(timeoutId);
-  }, [currentItem?.promptField, currentItem?.promptText, screen, ttsPitch, ttsRate]);
+  }, [currentItem?.promptField, currentItem?.promptText, effectiveTtsPitch, effectiveTtsRate, screen]);
 
   const prepareNextQuestionAutoplay = (previousItem, nextItem) => {
     nextPromptAutoplayDelayRef.current =
@@ -711,7 +720,7 @@ function AppShell({ storage }) {
     });
 
     if (isCorrect) {
-      const nextAdvanceDelay = getQuizAdvanceDelayMs(currentItem, ttsRate);
+      const nextAdvanceDelay = getQuizAdvanceDelayMs(currentItem, effectiveTtsRate);
       feedbackTimeoutRef.current = setTimeout(async () => {
         setQuizFeedback(null);
 
@@ -921,13 +930,29 @@ function AppShell({ storage }) {
       return speakWithTts({
         provider: overrides.provider ?? ttsProvider,
         text,
-        rate: overrides.rate ?? ttsRate,
-        pitch: overrides.pitch ?? ttsPitch,
+        rate: overrides.rate ?? effectiveTtsRate,
+        pitch: overrides.pitch ?? effectiveTtsPitch,
         language,
         voice: (overrides.voice ?? ttsVoice) || undefined,
+      }).then((result) => {
+        setDebugInfo((prev) => ({
+          ...prev,
+          lastSpeech: {
+            provider: result?.provider || overrides.provider || ttsProvider,
+            effectiveProvider: result?.effectiveProvider || currentTtsProviderStatus.effectiveProvider,
+            fallback: Boolean(result?.fallback),
+            cache: result?.cache || { client: 'unknown', server: 'unknown' },
+            language: result?.selectedLanguage || language || '',
+            voice: result?.selectedVoice || (overrides.voice ?? ttsVoice) || '',
+            text: String(text || ''),
+            at: new Date().toISOString(),
+          },
+        }));
+
+        return result;
       });
     },
-    [ttsPitch, ttsProvider, ttsRate, ttsVoice]
+    [currentTtsProviderStatus.effectiveProvider, effectiveTtsPitch, effectiveTtsRate, ttsProvider, ttsVoice]
   );
 
   const speakFrontText = useCallback(
@@ -1599,8 +1624,12 @@ function AppShell({ storage }) {
               <Text style={[styles.debugInfoText, { color: colors.primaryText }]}>
                 Effective provider: {debugInfo.effectiveProvider}
               </Text>
-              <Text style={[styles.debugInfoText, { color: colors.primaryText }]}>TTS rate: {ttsRate}</Text>
-              <Text style={[styles.debugInfoText, { color: colors.primaryText }]}>TTS pitch: {ttsPitch}</Text>
+              <Text style={[styles.debugInfoText, { color: colors.primaryText }]}>
+                TTS rate: {effectiveTtsRate}
+              </Text>
+              <Text style={[styles.debugInfoText, { color: colors.primaryText }]}>
+                TTS pitch: {effectiveTtsPitch}
+              </Text>
               <Text style={[styles.debugInfoText, { color: colors.primaryText }]}>
                 Selected voice: {ttsVoice || 'System default'}
               </Text>
@@ -1617,6 +1646,29 @@ function AppShell({ storage }) {
               <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
                 {debugInfo.providerMessage}
               </Text>
+            ) : null}
+            {debugInfo.lastSpeech ? (
+              <View style={[styles.debugLastSpeechCard, { backgroundColor: colors.softSurface, borderColor: colors.border }]}>
+                <Text style={[styles.settingsLabel, { color: colors.primaryText }]}>Last TTS request</Text>
+                <Text style={[styles.debugInfoText, { color: colors.primaryText }]}>
+                  Client cache: {debugInfo.lastSpeech.cache?.client || 'unknown'}
+                </Text>
+                <Text style={[styles.debugInfoText, { color: colors.primaryText }]}>
+                  Server cache: {debugInfo.lastSpeech.cache?.server || 'unknown'}
+                </Text>
+                <Text style={[styles.debugInfoText, { color: colors.primaryText }]}>
+                  Effective provider: {debugInfo.lastSpeech.effectiveProvider}
+                </Text>
+                <Text style={[styles.debugInfoText, { color: colors.primaryText }]}>
+                  Language: {debugInfo.lastSpeech.language || 'n/a'}
+                </Text>
+                <Text style={[styles.debugInfoText, { color: colors.primaryText }]}>
+                  Voice: {debugInfo.lastSpeech.voice || 'auto / system default'}
+                </Text>
+                <Text style={[styles.debugInfoText, styles.debugInfoMono, { color: colors.secondaryText }]}>
+                  Text: {debugInfo.lastSpeech.text || 'n/a'}
+                </Text>
+              </View>
             ) : null}
           </View>
 
@@ -1694,14 +1746,14 @@ function AppShell({ storage }) {
                     {voice.name || voice.identifier || `Voice ${index + 1}`}
                   </Text>
                   <Text style={[styles.debugVoiceMeta, { color: colors.secondaryText }]}>
-                    {(voice.language || voice.lang || 'unknown language') +
+                    {((voice.languageCodes || []).join(', ') || voice.language || voice.lang || 'unknown language') +
                       ' • ' +
                       (voice.identifier || voice.voiceURI || 'no id')}
                   </Text>
                   <Text style={[styles.debugVoiceMeta, styles.debugInfoMono, { color: colors.secondaryText }]}>
                     {`default=${String(Boolean(voice.isDefault))} • local=${String(
                       voice.localService ?? true
-                    )} • quality=${voice.quality ?? 'n/a'}`}
+                    )} • family=${voice.family || 'n/a'} • quality=${voice.quality ?? 'n/a'}`}
                   </Text>
                   <View style={styles.debugVoiceActionsRow}>
                     <Pressable
@@ -2033,63 +2085,74 @@ function AppShell({ storage }) {
           </Text>
         </View>
 
-        <View style={styles.settingsGroup}>
-          <Text style={[styles.settingsLabel, { color: colors.primaryText }]}>Speed</Text>
-          <View style={styles.quizSizeRow}>
-            {TTS_RATE_OPTIONS.map((value) => {
-              const active = ttsRate === value;
-              return (
-                <Pressable
-                  key={value}
-                  style={[
-                    styles.quizSizeChip,
-                    { borderColor: colors.border },
-                    active && { backgroundColor: colors.primaryText, borderColor: colors.primaryText },
-                  ]}
-                  onPress={() => updateSpeechSetting('tts_rate', value, setTtsRate)}
-                >
-                  <Text
-                    style={[
-                      styles.quizSizeText,
-                      { color: active ? colors.primaryButtonText : colors.primaryText },
-                    ]}
-                  >
-                    {value.toFixed(1)}x
-                  </Text>
-                </Pressable>
-              );
-            })}
+        {usesFixedGoogleTtsSettings ? (
+          <View style={styles.settingsGroup}>
+            <Text style={[styles.settingsLabel, { color: colors.primaryText }]}>Speed and pitch</Text>
+            <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
+              Google provider uses the default speech speed and pitch automatically.
+            </Text>
           </View>
-        </View>
+        ) : (
+          <>
+            <View style={styles.settingsGroup}>
+              <Text style={[styles.settingsLabel, { color: colors.primaryText }]}>Speed</Text>
+              <View style={styles.quizSizeRow}>
+                {TTS_RATE_OPTIONS.map((value) => {
+                  const active = ttsRate === value;
+                  return (
+                    <Pressable
+                      key={value}
+                      style={[
+                        styles.quizSizeChip,
+                        { borderColor: colors.border },
+                        active && { backgroundColor: colors.primaryText, borderColor: colors.primaryText },
+                      ]}
+                      onPress={() => updateSpeechSetting('tts_rate', value, setTtsRate)}
+                    >
+                      <Text
+                        style={[
+                          styles.quizSizeText,
+                          { color: active ? colors.primaryButtonText : colors.primaryText },
+                        ]}
+                      >
+                        {value.toFixed(1)}x
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
 
-        <View style={styles.settingsGroup}>
-          <Text style={[styles.settingsLabel, { color: colors.primaryText }]}>Pitch</Text>
-          <View style={styles.quizSizeRow}>
-            {TTS_PITCH_OPTIONS.map((value) => {
-              const active = ttsPitch === value;
-              return (
-                <Pressable
-                  key={value}
-                  style={[
-                    styles.quizSizeChip,
-                    { borderColor: colors.border },
-                    active && { backgroundColor: colors.primaryText, borderColor: colors.primaryText },
-                  ]}
-                  onPress={() => updateSpeechSetting('tts_pitch', value, setTtsPitch)}
-                >
-                  <Text
-                    style={[
-                      styles.quizSizeText,
-                      { color: active ? colors.primaryButtonText : colors.primaryText },
-                    ]}
-                  >
-                    {value.toFixed(1)}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
+            <View style={styles.settingsGroup}>
+              <Text style={[styles.settingsLabel, { color: colors.primaryText }]}>Pitch</Text>
+              <View style={styles.quizSizeRow}>
+                {TTS_PITCH_OPTIONS.map((value) => {
+                  const active = ttsPitch === value;
+                  return (
+                    <Pressable
+                      key={value}
+                      style={[
+                        styles.quizSizeChip,
+                        { borderColor: colors.border },
+                        active && { backgroundColor: colors.primaryText, borderColor: colors.primaryText },
+                      ]}
+                      onPress={() => updateSpeechSetting('tts_pitch', value, setTtsPitch)}
+                    >
+                      <Text
+                        style={[
+                          styles.quizSizeText,
+                          { color: active ? colors.primaryButtonText : colors.primaryText },
+                        ]}
+                      >
+                        {value.toFixed(1)}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          </>
+        )}
 
         <Pressable
           style={[styles.secondaryButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
@@ -2330,7 +2393,9 @@ function normalizeImportedLearningProgressRows(rawRows) {
 }
 
 function getVoiceCountryCode(voice) {
-  const language = String(voice?.language || voice?.lang || '').trim();
+  const language =
+    (Array.isArray(voice?.languageCodes) ? String(voice.languageCodes[0] || '').trim() : '') ||
+    String(voice?.language || voice?.lang || '').trim();
   if (!language) {
     return '';
   }
@@ -2352,6 +2417,15 @@ function formatVoiceCountryLabel(countryCode) {
   }
 
   return countryCode;
+}
+
+function isPreferredGoogleDebugVoice(voice) {
+  if (voice?.provider !== TTS_PROVIDER_GOOGLE) {
+    return true;
+  }
+
+  const family = String(voice?.family || voice?.quality || '').trim();
+  return family === 'Standard' || family === 'WaveNet';
 }
 
 function showAlert(title, message) {
@@ -2503,6 +2577,13 @@ const styles = StyleSheet.create({
       default: 'monospace',
     }),
     fontSize: 12,
+  },
+  debugLastSpeechCard: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 12,
+    gap: 4,
   },
   debugVoiceRow: {
     borderWidth: 1,

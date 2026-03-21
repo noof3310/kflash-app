@@ -3,8 +3,23 @@ import crypto from 'node:crypto';
 const GOOGLE_OAUTH_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_TTS_BASE_URL = 'https://texttospeech.googleapis.com/v1';
 const GOOGLE_TTS_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
+const GOOGLE_TOKEN_REFRESH_BUFFER_MS = 60 * 1000;
+const GOOGLE_VOICES_CACHE_TTL_MS = 60 * 60 * 1000;
+const GOOGLE_SPEECH_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const GOOGLE_SPEECH_CACHE_LIMIT = 200;
+
+let cachedAccessToken = '';
+let cachedAccessTokenExpiresAt = 0;
+const cachedVoicesByLanguage = new Map();
+const cachedSpeechPayloads = new Map();
 
 export async function listGoogleVoices({ languageCode } = {}) {
+  const voiceCacheKey = String(languageCode || '');
+  const cachedVoiceEntry = cachedVoicesByLanguage.get(voiceCacheKey);
+  if (cachedVoiceEntry && cachedVoiceEntry.expiresAt > Date.now()) {
+    return cachedVoiceEntry.payload;
+  }
+
   const accessToken = await getGoogleAccessToken();
   const searchParams = new URLSearchParams();
   if (languageCode) {
@@ -24,10 +39,25 @@ export async function listGoogleVoices({ languageCode } = {}) {
     throw new Error(`Google voices request failed with ${response.status}`);
   }
 
-  return response.json();
+  const payload = await response.json();
+  cachedVoicesByLanguage.set(voiceCacheKey, {
+    payload,
+    expiresAt: Date.now() + GOOGLE_VOICES_CACHE_TTL_MS,
+  });
+
+  return payload;
 }
 
 export async function synthesizeGoogleSpeech(payload) {
+  const speechCacheKey = buildSpeechCacheKey(payload);
+  const cachedSpeechEntry = cachedSpeechPayloads.get(speechCacheKey);
+  if (cachedSpeechEntry && cachedSpeechEntry.expiresAt > Date.now()) {
+    return {
+      payload: cachedSpeechEntry.payload,
+      cache: { server: 'hit' },
+    };
+  }
+
   const accessToken = await getGoogleAccessToken();
   const response = await fetch(`${GOOGLE_TTS_BASE_URL}/text:synthesize`, {
     method: 'POST',
@@ -43,7 +73,17 @@ export async function synthesizeGoogleSpeech(payload) {
     throw new Error(`Google synthesize request failed with ${response.status}: ${errorText}`);
   }
 
-  return response.json();
+  const responsePayload = await response.json();
+  cachedSpeechPayloads.set(speechCacheKey, {
+    payload: responsePayload,
+    expiresAt: Date.now() + GOOGLE_SPEECH_CACHE_TTL_MS,
+  });
+  trimSpeechCacheIfNeeded();
+
+  return {
+    payload: responsePayload,
+    cache: { server: 'miss' },
+  };
 }
 
 export function sendJson(res, statusCode, payload) {
@@ -107,6 +147,10 @@ function getGoogleServiceAccount() {
 }
 
 async function getGoogleAccessToken() {
+  if (cachedAccessToken && cachedAccessTokenExpiresAt - GOOGLE_TOKEN_REFRESH_BUFFER_MS > Date.now()) {
+    return cachedAccessToken;
+  }
+
   const { clientEmail, privateKey } = getGoogleServiceAccount();
 
   if (!clientEmail || !privateKey) {
@@ -147,6 +191,9 @@ async function getGoogleAccessToken() {
     throw new Error('Google OAuth token response did not include access_token.');
   }
 
+  cachedAccessToken = payload.access_token;
+  cachedAccessTokenExpiresAt = Date.now() + (Number(payload.expires_in || 3600) * 1000);
+
   return payload.access_token;
 }
 
@@ -172,4 +219,27 @@ function encodeBase64Url(value) {
 
 function normalizePrivateKey(privateKey) {
   return String(privateKey || '').replace(/\\n/g, '\n');
+}
+
+function buildSpeechCacheKey(payload) {
+  return JSON.stringify({
+    text: payload?.input?.text || '',
+    ssml: payload?.input?.ssml || '',
+    languageCode: payload?.voice?.languageCode || '',
+    name: payload?.voice?.name || '',
+    audioEncoding: payload?.audioConfig?.audioEncoding || '',
+    speakingRate: payload?.audioConfig?.speakingRate ?? '',
+    pitch: payload?.audioConfig?.pitch ?? '',
+  });
+}
+
+function trimSpeechCacheIfNeeded() {
+  if (cachedSpeechPayloads.size <= GOOGLE_SPEECH_CACHE_LIMIT) {
+    return;
+  }
+
+  const oldestKey = cachedSpeechPayloads.keys().next().value;
+  if (oldestKey) {
+    cachedSpeechPayloads.delete(oldestKey);
+  }
 }
