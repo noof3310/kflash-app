@@ -58,6 +58,8 @@ const DEFAULT_TTS_PITCH = 1.0;
 const DEFAULT_TTS_VOICE = '';
 const DEFAULT_TTS_PROVIDER = TTS_PROVIDER_SYSTEM;
 const DEFAULT_THEME = 'light';
+const DEFAULT_TTS_ENABLED = true;
+const DEFAULT_SFX_ENABLED = true;
 const QUIZ_FEEDBACK_DELAY_MS = 900;
 const QUIZ_CORRECT_SOUND_DURATION_MS = 600;
 const QUIZ_WRONG_SOUND_DURATION_MS = 750;
@@ -198,6 +200,8 @@ function AppShell({ storage }) {
   const [ttsPitch, setTtsPitch] = useState(DEFAULT_TTS_PITCH);
   const [ttsVoice, setTtsVoice] = useState(DEFAULT_TTS_VOICE);
   const [ttsProvider, setTtsProvider] = useState(DEFAULT_TTS_PROVIDER);
+  const [ttsEnabled, setTtsEnabled] = useState(DEFAULT_TTS_ENABLED);
+  const [sfxEnabled, setSfxEnabled] = useState(DEFAULT_SFX_ENABLED);
   const [theme, setTheme] = useState(DEFAULT_THEME);
   const [reviewScreenKey, setReviewScreenKey] = useState(0);
   const [debugCountryFilter, setDebugCountryFilter] = useState('all');
@@ -276,11 +280,15 @@ function AppShell({ storage }) {
       voice: DEFAULT_TTS_VOICE,
       provider: DEFAULT_TTS_PROVIDER,
       theme: DEFAULT_THEME,
+      ttsEnabled: DEFAULT_TTS_ENABLED,
+      sfxEnabled: DEFAULT_SFX_ENABLED,
     }).then((settings) => {
       setTtsRate(settings.rate);
       setTtsPitch(settings.pitch);
       setTtsVoice(settings.voice || DEFAULT_TTS_VOICE);
       setTtsProvider(settings.provider || DEFAULT_TTS_PROVIDER);
+      setTtsEnabled(settings.ttsEnabled ?? DEFAULT_TTS_ENABLED);
+      setSfxEnabled(settings.sfxEnabled ?? DEFAULT_SFX_ENABLED);
       setTheme(settings.theme);
     });
   }, [storage]);
@@ -640,6 +648,10 @@ function AppShell({ storage }) {
         return Promise.resolve();
       }
 
+      if (!ttsEnabled) {
+        return Promise.resolve();
+      }
+
       const tasks = [];
 
       if (quizItem.promptField === 'front' && quizItem.promptText) {
@@ -676,7 +688,7 @@ function AppShell({ storage }) {
 
       return Promise.allSettled(tasks);
     },
-    [effectiveTtsPitch, effectiveTtsRate, ttsProvider, ttsVoice]
+    [effectiveTtsPitch, effectiveTtsRate, ttsEnabled, ttsProvider, ttsVoice]
   );
 
   const startQuiz = useCallback(async () => {
@@ -1002,6 +1014,10 @@ function AppShell({ storage }) {
 
   const speakText = useCallback(
     (text, overrides = {}) => {
+      if (!ttsEnabled) {
+        return Promise.resolve(null);
+      }
+
       const language = overrides.language ?? getSpeechLanguage(text);
 
       return speakWithTts({
@@ -1029,7 +1045,7 @@ function AppShell({ storage }) {
         return result;
       });
     },
-    [currentTtsProviderStatus.effectiveProvider, effectiveTtsPitch, effectiveTtsRate, ttsProvider, ttsVoice]
+    [currentTtsProviderStatus.effectiveProvider, effectiveTtsPitch, effectiveTtsRate, ttsEnabled, ttsProvider, ttsVoice]
   );
 
   const speakFrontText = useCallback(
@@ -1065,6 +1081,10 @@ function AppShell({ storage }) {
   );
 
   const playFeedbackSound = async (isCorrect) => {
+    if (!sfxEnabled) {
+      return null;
+    }
+
     const requestId = feedbackSoundRequestRef.current + 1;
     feedbackSoundRequestRef.current = requestId;
 
@@ -1086,12 +1106,14 @@ function AppShell({ storage }) {
       player.play();
       return requestId;
     } catch (error) {
-      await speakWithTts({
-        provider: TTS_PROVIDER_SYSTEM,
-        text: isCorrect ? 'Correct' : 'Incorrect',
-        rate: 0.95,
-        pitch: isCorrect ? 1.0 : 0.85,
-      });
+      if (ttsEnabled) {
+        await speakWithTts({
+          provider: TTS_PROVIDER_SYSTEM,
+          text: isCorrect ? 'Correct' : 'Incorrect',
+          rate: 0.95,
+          pitch: isCorrect ? 1.0 : 0.85,
+        });
+      }
       return requestId;
     }
   };
@@ -2173,6 +2195,43 @@ function AppShell({ storage }) {
         <Text style={[styles.mutedText, { color: colors.secondaryText }]}>Adjust speech playback to match the way you want cards to sound.</Text>
 
         <View style={styles.settingsGroup}>
+          <Text style={[styles.settingsLabel, { color: colors.primaryText }]}>Sound types</Text>
+          <View style={styles.filterRow}>
+            {[
+              {
+                key: 'tts_enabled',
+                label: 'TTS',
+                active: ttsEnabled,
+                onPress: () => updateSpeechSetting('tts_enabled', !ttsEnabled, setTtsEnabled),
+              },
+              {
+                key: 'sfx_enabled',
+                label: 'SFX',
+                active: sfxEnabled,
+                onPress: () => updateSpeechSetting('sfx_enabled', !sfxEnabled, setSfxEnabled),
+              },
+            ].map((option) => (
+              <Pressable
+                key={option.key}
+                style={[
+                  styles.filterChip,
+                  { backgroundColor: colors.softSurface, borderColor: colors.border },
+                  option.active && { backgroundColor: colors.primaryText, borderColor: colors.primaryText },
+                ]}
+                onPress={option.onPress}
+              >
+                <Text style={[styles.filterChipText, { color: option.active ? colors.surface : colors.primaryText }]}>
+                  {option.label}: {option.active ? 'On' : 'Off'}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+          <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
+            Turn spoken card audio and answer sound effects on or off independently.
+          </Text>
+        </View>
+
+        <View style={styles.settingsGroup}>
           <Text style={[styles.settingsLabel, { color: colors.primaryText }]}>Provider</Text>
           <View style={styles.filterRow}>
             {TTS_PROVIDER_OPTIONS.map((option) => {
@@ -2269,8 +2328,16 @@ function AppShell({ storage }) {
         )}
 
         <Pressable
-          style={[styles.secondaryButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+          style={[
+            styles.secondaryButton,
+            {
+              backgroundColor: colors.surface,
+              borderColor: colors.border,
+              opacity: ttsEnabled ? 1 : 0.55,
+            },
+          ]}
           onPress={() => speakFrontText(findSpeechPreviewText(cards))}
+          disabled={!ttsEnabled}
         >
           <Text style={[styles.secondaryButtonText, { color: colors.primaryText }]}>Preview speech</Text>
         </Pressable>
@@ -2300,9 +2367,6 @@ function AppShell({ storage }) {
         <Text style={[styles.mutedText, { color: colors.secondaryText }]}>Delete all sets, cards, and quiz history from this device.</Text>
         <Pressable style={[styles.dangerButton, { backgroundColor: colors.dangerSurface, borderColor: colors.dangerBorder }]} onPress={clearAllData}>
           <Text style={[styles.dangerButtonText, { color: colors.dangerText }]}>Clear all data</Text>
-        </Pressable>
-        <Pressable style={[styles.dangerButton, { backgroundColor: colors.dangerSurface, borderColor: colors.dangerBorder }]} onPress={resetDatabaseSchema}>
-          <Text style={[styles.dangerButtonText, { color: colors.dangerText }]}>Reset DB schema</Text>
         </Pressable>
       </View>
 

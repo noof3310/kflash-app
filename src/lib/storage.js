@@ -413,6 +413,8 @@ export function createWebStorage() {
         theme: store.appSettings.theme || defaults.theme,
         voice: store.appSettings.tts_voice || defaults.voice,
         provider: store.appSettings.tts_provider || defaults.provider,
+        ttsEnabled: store.appSettings.tts_enabled ? store.appSettings.tts_enabled === 'true' : defaults.ttsEnabled,
+        sfxEnabled: store.appSettings.sfx_enabled ? store.appSettings.sfx_enabled === 'true' : defaults.sfxEnabled,
       };
     },
 
