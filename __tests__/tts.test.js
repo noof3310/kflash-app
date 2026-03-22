@@ -34,8 +34,8 @@ describe('tts helpers', () => {
       },
       audioConfig: {
         audioEncoding: 'MP3',
-        speakingRate: 1,
-        pitch: 0,
+        speakingRate: 0.9,
+        pitch: 1.0,
         volumeGainDb: 6,
       },
     });
