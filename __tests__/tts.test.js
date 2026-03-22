@@ -34,6 +34,8 @@ describe('tts helpers', () => {
       },
       audioConfig: {
         audioEncoding: 'MP3',
+        speakingRate: 1,
+        pitch: 0,
         volumeGainDb: 6,
       },
     });
@@ -55,7 +57,7 @@ describe('tts helpers', () => {
     );
   });
 
-  test('buildGoogleTtsCacheKey ignores rate and pitch differences for google defaults', () => {
+  test('buildGoogleTtsCacheKey uses fixed google audio settings despite app-side rate and pitch inputs', () => {
     expect(
       buildGoogleTtsCacheKey({
         text: '안녕하세요',
@@ -71,6 +73,23 @@ describe('tts helpers', () => {
         voice: 'ko-KR-Wavenet-B',
         rate: 1.2,
         pitch: 0.8,
+        volume: 0.3,
+      })
+    );
+  });
+
+  test('buildGoogleTtsCacheKey changes when google voice changes', () => {
+    expect(
+      buildGoogleTtsCacheKey({
+        text: '안녕하세요',
+        language: 'ko-KR',
+        voice: 'ko-KR-Wavenet-B',
+      })
+    ).not.toBe(
+      buildGoogleTtsCacheKey({
+        text: '안녕하세요',
+        language: 'ko-KR',
+        voice: 'ko-KR-Wavenet-C',
       })
     );
   });

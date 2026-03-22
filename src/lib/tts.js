@@ -52,8 +52,20 @@ export function getTtsProviderStatus(provider) {
   };
 }
 
+const GOOGLE_TTS_AUDIO_ENCODING = 'MP3';
+const GOOGLE_TTS_DEFAULT_SPEAKING_RATE = 1;
+const GOOGLE_TTS_DEFAULT_PITCH = 0;
 const GOOGLE_TTS_DEFAULT_VOLUME_GAIN_DB = 6;
 const GOOGLE_TTS_KOREAN_DEFAULT_VOICE = 'ko-KR-Wavenet-D';
+
+function buildGoogleTtsAudioConfig() {
+  return {
+    audioEncoding: GOOGLE_TTS_AUDIO_ENCODING,
+    speakingRate: GOOGLE_TTS_DEFAULT_SPEAKING_RATE,
+    pitch: GOOGLE_TTS_DEFAULT_PITCH,
+    volumeGainDb: GOOGLE_TTS_DEFAULT_VOLUME_GAIN_DB,
+  };
+}
 
 export function buildGoogleTtsRequest({ text, language, voice }) {
   return {
@@ -62,10 +74,7 @@ export function buildGoogleTtsRequest({ text, language, voice }) {
       languageCode: language || undefined,
       name: voice || undefined,
     },
-    audioConfig: {
-      audioEncoding: 'MP3',
-      volumeGainDb: GOOGLE_TTS_DEFAULT_VOLUME_GAIN_DB,
-    },
+    audioConfig: buildGoogleTtsAudioConfig(),
   };
 }
 
@@ -75,6 +84,7 @@ export function buildGoogleTtsCacheKey({ text, language, voice }) {
       text: String(text || ''),
       language: String(language || ''),
       voice: String(voice || ''),
+      ...buildGoogleTtsAudioConfig(),
     })
   );
 }
