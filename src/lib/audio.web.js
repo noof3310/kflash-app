@@ -7,6 +7,7 @@ export async function setAudioModeAsync() {}
 export function createAudioPlayer(source) {
   let audio = null;
   let audioSource = getAssetUri(source);
+  let volume = 1;
 
   const ensureAudio = () => {
     if (typeof window === 'undefined' || typeof window.Audio === 'undefined') {
@@ -32,6 +33,7 @@ export function createAudioPlayer(source) {
         element.src = audioSource;
       }
 
+      element.volume = volume;
       await element.play().catch(() => {});
     },
     pause() {
@@ -56,6 +58,15 @@ export function createAudioPlayer(source) {
         audio.currentTime = Number(seconds) || 0;
       } catch {}
     },
+    get volume() {
+      return volume;
+    },
+    set volume(nextVolume) {
+      volume = Math.min(1, Math.max(0, Number(nextVolume) || 0));
+      if (audio) {
+        audio.volume = volume;
+      }
+    },
     remove() {
       if (!audio) {
         return;
@@ -75,6 +86,7 @@ export function useAudioPlayer(source) {
   const sourceNodeRef = useRef(null);
   const gainNodeRef = useRef(null);
   const seekOffsetRef = useRef(0);
+  const volumeRef = useRef(1);
   const assetUri = getAssetUri(source);
 
   useEffect(() => {
@@ -89,7 +101,7 @@ export function useAudioPlayer(source) {
 
     const context = new AudioContextClass();
     const gainNode = context.createGain();
-    gainNode.gain.value = FEEDBACK_GAIN;
+    gainNode.gain.value = FEEDBACK_GAIN * volumeRef.current;
     gainNode.connect(context.destination);
 
     audioContextRef.current = context;
@@ -148,6 +160,8 @@ export function useAudioPlayer(source) {
           sourceNodeRef.current.disconnect();
         }
 
+        gainNode.gain.value = FEEDBACK_GAIN * volumeRef.current;
+
         const sourceNode = context.createBufferSource();
         sourceNode.buffer = buffer;
         sourceNode.connect(gainNode);
@@ -174,6 +188,15 @@ export function useAudioPlayer(source) {
       },
       seekTo(seconds) {
         seekOffsetRef.current = Number(seconds) || 0;
+      },
+      get volume() {
+        return volumeRef.current;
+      },
+      set volume(nextVolume) {
+        volumeRef.current = Math.min(1, Math.max(0, Number(nextVolume) || 0));
+        if (gainNodeRef.current) {
+          gainNodeRef.current.gain.value = FEEDBACK_GAIN * volumeRef.current;
+        }
       },
     }),
     []
