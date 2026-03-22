@@ -294,7 +294,7 @@ export async function prefetchTts({ text, language, pitch, provider, rate, voice
   };
 }
 
-export async function speakWithTts({ text, language, pitch, provider, rate, voice }) {
+export async function speakWithTts({ text, language, pitch, provider, rate, voice, volume }) {
   if (provider === TTS_PROVIDER_GOOGLE && GOOGLE_TTS_PROXY_BASE_URL) {
     try {
       await stopTtsPlayback();
@@ -323,6 +323,9 @@ export async function speakWithTts({ text, language, pitch, provider, rate, voic
       }
 
       googlePlayer = createAudioPlayer(audioSource);
+      if (googlePlayer) {
+        googlePlayer.volume = Number.isFinite(volume) ? Math.max(0, Math.min(1, volume)) : 1;
+      }
       if (googlePlayer?.play) {
         await googlePlayer.play();
       }
@@ -340,7 +343,7 @@ export async function speakWithTts({ text, language, pitch, provider, rate, voic
         selectedLanguage: selectedLanguage || '',
       };
     } catch (error) {
-      await speakWithSystemTts({ text, language, pitch, rate, voice });
+      await speakWithSystemTts({ text, language, pitch, rate, voice, volume });
       return {
         provider,
         effectiveProvider: TTS_PROVIDER_SYSTEM,
@@ -356,7 +359,7 @@ export async function speakWithTts({ text, language, pitch, provider, rate, voic
     }
   }
 
-  await speakWithSystemTts({ text, language, pitch, rate, voice });
+  await speakWithSystemTts({ text, language, pitch, rate, voice, volume });
   return {
     provider,
     effectiveProvider: TTS_PROVIDER_SYSTEM,
@@ -401,13 +404,14 @@ async function listSystemVoices() {
   }
 }
 
-async function speakWithSystemTts({ text, language, pitch, rate, voice }) {
+async function speakWithSystemTts({ text, language, pitch, rate, voice, volume }) {
   Speech.stop();
   Speech.speak(text, {
     language,
     pitch,
     rate,
     voice: voice || undefined,
+    volume: Number.isFinite(volume) ? Math.max(0, Math.min(1, volume)) : 1,
   });
 }
 

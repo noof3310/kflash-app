@@ -89,8 +89,8 @@ export async function saveQuizSession(db, selectedSetIds, answers) {
 
 export async function loadAppSettings(db, defaults) {
   const rows = await db.getAllAsync(
-    'SELECT key, value FROM app_settings WHERE key IN (?, ?, ?, ?, ?, ?, ?)',
-    ['tts_rate', 'tts_pitch', 'theme', 'tts_voice', 'tts_provider', 'tts_enabled', 'sfx_enabled']
+    'SELECT key, value FROM app_settings WHERE key IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    ['tts_rate', 'tts_pitch', 'theme', 'tts_voice', 'tts_provider', 'tts_enabled', 'tts_volume', 'sfx_enabled', 'sfx_volume', 'tts_autoplay_enabled']
   );
 
   const settingsMap = Object.fromEntries((rows ?? []).map((row) => [row.key, row.value]));
@@ -102,7 +102,10 @@ export async function loadAppSettings(db, defaults) {
     voice: settingsMap.tts_voice || defaults.voice,
     provider: settingsMap.tts_provider || defaults.provider,
     ttsEnabled: settingsMap.tts_enabled ? settingsMap.tts_enabled === 'true' : defaults.ttsEnabled,
+    ttsVolume: Number(settingsMap.tts_volume) || defaults.ttsVolume,
     sfxEnabled: settingsMap.sfx_enabled ? settingsMap.sfx_enabled === 'true' : defaults.sfxEnabled,
+    sfxVolume: Number(settingsMap.sfx_volume) || defaults.sfxVolume,
+    autoPlayTtsEnabled: settingsMap.tts_autoplay_enabled ? settingsMap.tts_autoplay_enabled === 'true' : defaults.autoPlayTtsEnabled,
   };
 }
 

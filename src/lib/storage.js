@@ -414,7 +414,10 @@ export function createWebStorage() {
         voice: store.appSettings.tts_voice || defaults.voice,
         provider: store.appSettings.tts_provider || defaults.provider,
         ttsEnabled: store.appSettings.tts_enabled ? store.appSettings.tts_enabled === 'true' : defaults.ttsEnabled,
+        ttsVolume: Number(store.appSettings.tts_volume) || defaults.ttsVolume,
         sfxEnabled: store.appSettings.sfx_enabled ? store.appSettings.sfx_enabled === 'true' : defaults.sfxEnabled,
+        sfxVolume: Number(store.appSettings.sfx_volume) || defaults.sfxVolume,
+        autoPlayTtsEnabled: store.appSettings.tts_autoplay_enabled ? store.appSettings.tts_autoplay_enabled === 'true' : defaults.autoPlayTtsEnabled,
       };
     },
 
