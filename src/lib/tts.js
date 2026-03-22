@@ -52,7 +52,10 @@ export function getTtsProviderStatus(provider) {
   };
 }
 
-export function buildGoogleTtsRequest({ text, language, voice, rate, pitch }) {
+const GOOGLE_TTS_DEFAULT_VOLUME_GAIN_DB = 6;
+const GOOGLE_TTS_KOREAN_DEFAULT_VOICE = 'ko-KR-Wavenet-D';
+
+export function buildGoogleTtsRequest({ text, language, voice }) {
   return {
     input: { text },
     voice: {
@@ -61,20 +64,17 @@ export function buildGoogleTtsRequest({ text, language, voice, rate, pitch }) {
     },
     audioConfig: {
       audioEncoding: 'MP3',
-      speakingRate: rate,
-      pitch,
+      volumeGainDb: GOOGLE_TTS_DEFAULT_VOLUME_GAIN_DB,
     },
   };
 }
 
-export function buildGoogleTtsCacheKey({ text, language, voice, rate, pitch }) {
+export function buildGoogleTtsCacheKey({ text, language, voice }) {
   return hashString(
     JSON.stringify({
       text: String(text || ''),
       language: String(language || ''),
       voice: String(voice || ''),
-      rate: Number.isFinite(rate) ? rate : '',
-      pitch: Number.isFinite(pitch) ? pitch : '',
     })
   );
 }
@@ -242,15 +242,11 @@ export async function prefetchTts({ text, language, pitch, provider, rate, voice
         text,
         language: selectedLanguage,
         voice: selectedVoice,
-        rate,
-        pitch,
       });
       const cacheKey = buildGoogleTtsCacheKey({
         text,
         language: selectedLanguage,
         voice: selectedVoice,
-        rate,
-        pitch,
       });
       const payload = await fetchGoogleSpeechPayload(requestPayload, cacheKey);
       await resolveGoogleAudioSource(payload, cacheKey);
@@ -306,15 +302,11 @@ export async function speakWithTts({ text, language, pitch, provider, rate, voic
         text,
         language: selectedLanguage,
         voice: selectedVoice,
-        rate,
-        pitch,
       });
       const cacheKey = buildGoogleTtsCacheKey({
         text,
         language: selectedLanguage,
         voice: selectedVoice,
-        rate,
-        pitch,
       });
       const payload = await fetchGoogleSpeechPayload(requestPayload, cacheKey);
       const audioSource = await resolveGoogleAudioSource(payload, cacheKey);
@@ -588,7 +580,24 @@ async function fetchGoogleVoices() {
 
 async function getAutoSelectedGoogleVoiceName({ language, preferredGender }) {
   const voices = await fetchGoogleVoices();
+  const koreanDefaultVoice = pickGoogleDefaultVoiceForLanguage(voices, language);
+  if (koreanDefaultVoice) {
+    return koreanDefaultVoice.identifier || '';
+  }
+
   return pickBestGoogleVoice(voices, language, preferredGender)?.identifier || '';
+}
+
+
+function pickGoogleDefaultVoiceForLanguage(voices, language) {
+  const normalizedLanguage = String(language || '').trim().toLowerCase();
+  if (!normalizedLanguage.startsWith('ko')) {
+    return null;
+  }
+
+  return (Array.isArray(voices) ? voices : []).find(
+    (voice) => String(voice?.identifier || voice?.name || '').toLowerCase() === GOOGLE_TTS_KOREAN_DEFAULT_VOICE.toLowerCase()
+  ) || null;
 }
 
 async function getAutoSelectedGoogleVoiceLanguage({ voiceName }) {

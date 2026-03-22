@@ -24,8 +24,6 @@ describe('tts helpers', () => {
         text: '안녕하세요',
         language: 'ko-KR',
         voice: 'ko-KR-Voice-1',
-        rate: 0.9,
-        pitch: 1.1,
       })
     ).toEqual({
       input: { text: '안녕하세요' },
@@ -35,13 +33,28 @@ describe('tts helpers', () => {
       },
       audioConfig: {
         audioEncoding: 'MP3',
-        speakingRate: 0.9,
-        pitch: 1.1,
+        volumeGainDb: 6,
       },
     });
   });
 
   test('buildGoogleTtsCacheKey is stable for the same request payload', () => {
+    expect(
+      buildGoogleTtsCacheKey({
+        text: '안녕하세요',
+        language: 'ko-KR',
+        voice: 'ko-KR-Wavenet-B',
+      })
+    ).toBe(
+      buildGoogleTtsCacheKey({
+        text: '안녕하세요',
+        language: 'ko-KR',
+        voice: 'ko-KR-Wavenet-B',
+      })
+    );
+  });
+
+  test('buildGoogleTtsCacheKey ignores rate and pitch differences for google defaults', () => {
     expect(
       buildGoogleTtsCacheKey({
         text: '안녕하세요',
@@ -55,8 +68,8 @@ describe('tts helpers', () => {
         text: '안녕하세요',
         language: 'ko-KR',
         voice: 'ko-KR-Wavenet-B',
-        rate: 0.9,
-        pitch: 1,
+        rate: 1.2,
+        pitch: 0.8,
       })
     );
   });
