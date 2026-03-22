@@ -16,6 +16,7 @@ import {
   TTS_PROVIDER_GOOGLE,
   TTS_PROVIDER_SYSTEM,
 } from '../src/lib/tts';
+import { buildSpeechCacheKey } from '../api/_lib/googleTts';
 
 describe('tts helpers', () => {
   test('buildGoogleTtsRequest maps app settings to google payload shape', () => {
@@ -70,6 +71,28 @@ describe('tts helpers', () => {
         voice: 'ko-KR-Wavenet-B',
         rate: 1.2,
         pitch: 0.8,
+      })
+    );
+  });
+
+  test('buildSpeechCacheKey changes when google volumeGainDb changes', () => {
+    expect(
+      buildSpeechCacheKey({
+        input: { text: '안녕하세요' },
+        voice: { languageCode: 'ko-KR', name: 'ko-KR-Wavenet-B' },
+        audioConfig: {
+          audioEncoding: 'MP3',
+          volumeGainDb: 6,
+        },
+      })
+    ).not.toBe(
+      buildSpeechCacheKey({
+        input: { text: '안녕하세요' },
+        voice: { languageCode: 'ko-KR', name: 'ko-KR-Wavenet-B' },
+        audioConfig: {
+          audioEncoding: 'MP3',
+          volumeGainDb: 0,
+        },
       })
     );
   });
