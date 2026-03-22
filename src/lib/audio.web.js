@@ -7,6 +7,7 @@ export async function setAudioModeAsync() {}
 export function createAudioPlayer(source) {
   let audio = null;
   let audioSource = getAssetUri(source);
+  let volume = 1;
 
   const ensureAudio = () => {
     if (typeof window === 'undefined' || typeof window.Audio === 'undefined') {
@@ -17,6 +18,8 @@ export function createAudioPlayer(source) {
       audio = new window.Audio(audioSource || undefined);
       audio.preload = 'auto';
     }
+
+    audio.volume = volume;
 
     return audio;
   };
@@ -36,6 +39,15 @@ export function createAudioPlayer(source) {
     },
     pause() {
       audio?.pause();
+    },
+    set volume(value) {
+      volume = Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 1;
+      if (audio) {
+        audio.volume = volume;
+      }
+    },
+    get volume() {
+      return volume;
     },
     replace(nextSource) {
       audioSource = getAssetUri(nextSource);
@@ -75,6 +87,7 @@ export function useAudioPlayer(source) {
   const sourceNodeRef = useRef(null);
   const gainNodeRef = useRef(null);
   const seekOffsetRef = useRef(0);
+  const volumeRef = useRef(1);
   const assetUri = getAssetUri(source);
 
   useEffect(() => {
@@ -89,7 +102,7 @@ export function useAudioPlayer(source) {
 
     const context = new AudioContextClass();
     const gainNode = context.createGain();
-    gainNode.gain.value = FEEDBACK_GAIN;
+    gainNode.gain.value = FEEDBACK_GAIN * volumeRef.current;
     gainNode.connect(context.destination);
 
     audioContextRef.current = context;
@@ -174,6 +187,16 @@ export function useAudioPlayer(source) {
       },
       seekTo(seconds) {
         seekOffsetRef.current = Number(seconds) || 0;
+      },
+      set volume(value) {
+        const normalized = Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 1;
+        volumeRef.current = normalized;
+        if (gainNodeRef.current) {
+          gainNodeRef.current.gain.value = FEEDBACK_GAIN * normalized;
+        }
+      },
+      get volume() {
+        return volumeRef.current;
       },
     }),
     []

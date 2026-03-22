@@ -53,6 +53,7 @@ const DB_NAME = 'flashcards.db';
 const QUIZ_SIZE_OPTIONS = [10, 20, 30];
 const TTS_RATE_OPTIONS = [0.3, 0.6, 0.9];
 const TTS_PITCH_OPTIONS = [0.8, 1.0, 1.2];
+const VOLUME_OPTIONS = [0.25, 0.5, 0.75, 1.0];
 const DEFAULT_TTS_RATE = 0.9;
 const DEFAULT_TTS_PITCH = 1.0;
 const DEFAULT_TTS_VOICE = '';
@@ -60,6 +61,9 @@ const DEFAULT_TTS_PROVIDER = TTS_PROVIDER_SYSTEM;
 const DEFAULT_THEME = 'light';
 const DEFAULT_TTS_ENABLED = true;
 const DEFAULT_SFX_ENABLED = true;
+const DEFAULT_TTS_VOLUME = 1.0;
+const DEFAULT_SFX_VOLUME = 1.0;
+const DEFAULT_AUTO_PLAY_TTS_ENABLED = true;
 const QUIZ_FEEDBACK_DELAY_MS = 900;
 const QUIZ_CORRECT_SOUND_DURATION_MS = 600;
 const QUIZ_WRONG_SOUND_DURATION_MS = 750;
@@ -201,7 +205,10 @@ function AppShell({ storage }) {
   const [ttsVoice, setTtsVoice] = useState(DEFAULT_TTS_VOICE);
   const [ttsProvider, setTtsProvider] = useState(DEFAULT_TTS_PROVIDER);
   const [ttsEnabled, setTtsEnabled] = useState(DEFAULT_TTS_ENABLED);
+  const [ttsVolume, setTtsVolume] = useState(DEFAULT_TTS_VOLUME);
   const [sfxEnabled, setSfxEnabled] = useState(DEFAULT_SFX_ENABLED);
+  const [sfxVolume, setSfxVolume] = useState(DEFAULT_SFX_VOLUME);
+  const [autoPlayTtsEnabled, setAutoPlayTtsEnabled] = useState(DEFAULT_AUTO_PLAY_TTS_ENABLED);
   const [theme, setTheme] = useState(DEFAULT_THEME);
   const [reviewScreenKey, setReviewScreenKey] = useState(0);
   const [debugCountryFilter, setDebugCountryFilter] = useState('all');
@@ -281,14 +288,20 @@ function AppShell({ storage }) {
       provider: DEFAULT_TTS_PROVIDER,
       theme: DEFAULT_THEME,
       ttsEnabled: DEFAULT_TTS_ENABLED,
+      ttsVolume: DEFAULT_TTS_VOLUME,
       sfxEnabled: DEFAULT_SFX_ENABLED,
+      sfxVolume: DEFAULT_SFX_VOLUME,
+      autoPlayTtsEnabled: DEFAULT_AUTO_PLAY_TTS_ENABLED,
     }).then((settings) => {
       setTtsRate(settings.rate);
       setTtsPitch(settings.pitch);
       setTtsVoice(settings.voice || DEFAULT_TTS_VOICE);
       setTtsProvider(settings.provider || DEFAULT_TTS_PROVIDER);
       setTtsEnabled(settings.ttsEnabled ?? DEFAULT_TTS_ENABLED);
+      setTtsVolume(settings.ttsVolume ?? DEFAULT_TTS_VOLUME);
       setSfxEnabled(settings.sfxEnabled ?? DEFAULT_SFX_ENABLED);
+      setSfxVolume(settings.sfxVolume ?? DEFAULT_SFX_VOLUME);
+      setAutoPlayTtsEnabled(settings.autoPlayTtsEnabled ?? DEFAULT_AUTO_PLAY_TTS_ENABLED);
       setTheme(settings.theme);
     });
   }, [storage]);
@@ -738,7 +751,7 @@ function AppShell({ storage }) {
   const progressText = quizTargetCount ? `${Math.min(quizIndex + 1, quizTargetCount)} / ${quizTargetCount}` : '0 / 0';
 
   useEffect(() => {
-    if (screen !== 'quiz' || currentItem?.promptField !== 'front' || !currentItem?.promptText) {
+    if (screen !== 'quiz' || !autoPlayTtsEnabled || currentItem?.promptField !== 'front' || !currentItem?.promptText) {
       return undefined;
     }
 
@@ -749,7 +762,7 @@ function AppShell({ storage }) {
     }, delayMs);
 
     return () => clearTimeout(timeoutId);
-  }, [currentItem?.promptField, currentItem?.promptText, effectiveTtsPitch, effectiveTtsRate, screen]);
+  }, [autoPlayTtsEnabled, currentItem?.promptField, currentItem?.promptText, effectiveTtsPitch, effectiveTtsRate, screen]);
 
   useEffect(() => {
     if (screen !== 'quiz' || !currentItem) {
@@ -1027,6 +1040,7 @@ function AppShell({ storage }) {
         pitch: overrides.pitch ?? effectiveTtsPitch,
         language,
         voice: (overrides.voice ?? ttsVoice) || undefined,
+        volume: overrides.volume ?? ttsVolume,
       }).then((result) => {
         setDebugInfo((prev) => ({
           ...prev,
@@ -1045,7 +1059,7 @@ function AppShell({ storage }) {
         return result;
       });
     },
-    [currentTtsProviderStatus.effectiveProvider, effectiveTtsPitch, effectiveTtsRate, ttsEnabled, ttsProvider, ttsVoice]
+    [currentTtsProviderStatus.effectiveProvider, effectiveTtsPitch, effectiveTtsRate, ttsEnabled, ttsProvider, ttsVoice, ttsVolume]
   );
 
   const speakFrontText = useCallback(
@@ -1102,6 +1116,7 @@ function AppShell({ storage }) {
       }
 
       const player = isCorrect ? correctPlayer : wrongPlayer;
+      player.volume = sfxVolume;
       player.seekTo(0);
       player.play();
       return requestId;
@@ -1112,6 +1127,7 @@ function AppShell({ storage }) {
           text: isCorrect ? 'Correct' : 'Incorrect',
           rate: 0.95,
           pitch: isCorrect ? 1.0 : 0.85,
+          volume: ttsVolume,
         });
       }
       return requestId;
@@ -1120,7 +1136,7 @@ function AppShell({ storage }) {
 
   const playPostAnswerAudio = async (quizItem, isCorrect) => {
     const requestId = await playFeedbackSound(isCorrect);
-    if (!requestId || quizItem?.promptField !== 'back') {
+    if (!requestId || !autoPlayTtsEnabled || quizItem?.promptField !== 'back') {
       return;
     }
 
@@ -1428,12 +1444,14 @@ function AppShell({ storage }) {
                     </Text>
                   ) : null}
                 </View>
-                <Pressable
-                  style={[styles.listenMiniButton, { backgroundColor: colors.softAccent }]}
-                  onPress={() => speakFrontText(item.front)}
-                >
-                  <Text style={styles.listenMiniText}>🔊</Text>
-                </Pressable>
+                {ttsEnabled ? (
+                  <Pressable
+                    style={[styles.listenMiniButton, { backgroundColor: colors.softAccent }]}
+                    onPress={() => speakFrontText(item.front)}
+                  >
+                    <Text style={styles.listenMiniText}>🔊</Text>
+                  </Pressable>
+                ) : null}
               </View>
             ))}
           </View>
@@ -1479,7 +1497,7 @@ function AppShell({ storage }) {
             >
               {currentItem.promptText}
             </Text>
-            {currentItem.promptField === 'front' ? (
+            {ttsEnabled && currentItem.promptField === 'front' ? (
               <Pressable
                 style={[styles.listenMiniButton, { backgroundColor: colors.softAccent }]}
                 onPress={() => speakFrontText(currentItem.promptText)}
@@ -1525,7 +1543,7 @@ function AppShell({ storage }) {
                   >
                     {option}
                   </Text>
-                  {currentItem.promptField === 'back' && option !== QUIZ_DONT_KNOW_OPTION ? (
+                  {ttsEnabled && currentItem.promptField === 'back' && option !== QUIZ_DONT_KNOW_OPTION ? (
                     <Pressable
                       style={[styles.optionSoundButton, { backgroundColor: colors.softAccent, borderColor: colors.border }]}
                       onPress={(event) => {
@@ -2210,6 +2228,12 @@ function AppShell({ storage }) {
                 active: sfxEnabled,
                 onPress: () => updateSpeechSetting('sfx_enabled', !sfxEnabled, setSfxEnabled),
               },
+              {
+                key: 'tts_autoplay_enabled',
+                label: 'Auto-play TTS',
+                active: autoPlayTtsEnabled,
+                onPress: () => updateSpeechSetting('tts_autoplay_enabled', !autoPlayTtsEnabled, setAutoPlayTtsEnabled),
+              },
             ].map((option) => (
               <Pressable
                 key={option.key}
@@ -2227,8 +2251,58 @@ function AppShell({ storage }) {
             ))}
           </View>
           <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
-            Turn spoken card audio and answer sound effects on or off independently.
+            Turn spoken card audio, answer sound effects, and automatic prompt playback on or off independently.
           </Text>
+        </View>
+
+        <View style={styles.settingsGroup}>
+          <Text style={[styles.settingsLabel, { color: colors.primaryText }]}>TTS volume</Text>
+          <View style={styles.quizSizeRow}>
+            {VOLUME_OPTIONS.map((value) => {
+              const active = ttsVolume === value;
+              return (
+                <Pressable
+                  key={`tts-volume-${value}`}
+                  style={[
+                    styles.quizSizeChip,
+                    { borderColor: colors.border },
+                    active && { backgroundColor: colors.primaryText, borderColor: colors.primaryText },
+                  ]}
+                  onPress={() => updateSpeechSetting('tts_volume', value, setTtsVolume)}
+                >
+                  <Text style={[styles.quizSizeText, { color: active ? colors.primaryButtonText : colors.primaryText }]}>
+                    {Math.round(value * 100)}%
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Text style={[styles.mutedText, { color: colors.secondaryText }]}>Manual previews and auto-play speech use this volume.</Text>
+        </View>
+
+        <View style={styles.settingsGroup}>
+          <Text style={[styles.settingsLabel, { color: colors.primaryText }]}>SFX volume</Text>
+          <View style={styles.quizSizeRow}>
+            {VOLUME_OPTIONS.map((value) => {
+              const active = sfxVolume === value;
+              return (
+                <Pressable
+                  key={`sfx-volume-${value}`}
+                  style={[
+                    styles.quizSizeChip,
+                    { borderColor: colors.border },
+                    active && { backgroundColor: colors.primaryText, borderColor: colors.primaryText },
+                  ]}
+                  onPress={() => updateSpeechSetting('sfx_volume', value, setSfxVolume)}
+                >
+                  <Text style={[styles.quizSizeText, { color: active ? colors.primaryButtonText : colors.primaryText }]}>
+                    {Math.round(value * 100)}%
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Text style={[styles.mutedText, { color: colors.secondaryText }]}>Correct and incorrect answer sounds use this volume.</Text>
         </View>
 
         <View style={styles.settingsGroup}>
@@ -2327,20 +2401,20 @@ function AppShell({ storage }) {
           </>
         )}
 
-        <Pressable
-          style={[
-            styles.secondaryButton,
-            {
-              backgroundColor: colors.surface,
-              borderColor: colors.border,
-              opacity: ttsEnabled ? 1 : 0.55,
-            },
-          ]}
-          onPress={() => speakFrontText(findSpeechPreviewText(cards))}
-          disabled={!ttsEnabled}
-        >
-          <Text style={[styles.secondaryButtonText, { color: colors.primaryText }]}>Preview speech</Text>
-        </Pressable>
+        {ttsEnabled ? (
+          <Pressable
+            style={[
+              styles.secondaryButton,
+              {
+                backgroundColor: colors.surface,
+                borderColor: colors.border,
+              },
+            ]}
+            onPress={() => speakFrontText(findSpeechPreviewText(cards))}
+          >
+            <Text style={[styles.secondaryButtonText, { color: colors.primaryText }]}>Preview speech</Text>
+          </Pressable>
+        ) : null}
       </View>
 
       <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -2395,9 +2469,11 @@ function AppShell({ storage }) {
                   </Text>
                 ) : null}
               </View>
-              <Pressable style={[styles.listenMiniButton, { backgroundColor: colors.softAccent }]} onPress={() => speakFrontText(item.front)}>
-                <Text style={styles.listenMiniText}>🔊</Text>
-              </Pressable>
+              {ttsEnabled ? (
+                <Pressable style={[styles.listenMiniButton, { backgroundColor: colors.softAccent }]} onPress={() => speakFrontText(item.front)}>
+                  <Text style={styles.listenMiniText}>🔊</Text>
+                </Pressable>
+              ) : null}
             </View>
           ))
         )}
