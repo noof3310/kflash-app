@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { setAudioModeAsync, useAudioPlayer } from './src/lib/audio';
+import { prepareFeedbackPlayback } from './src/lib/audioFeedback';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import Papa from 'papaparse';
@@ -1095,12 +1096,15 @@ function AppShell({ storage }) {
   );
 
   const playFeedbackSound = async (isCorrect) => {
-    if (!sfxEnabled) {
-      return null;
-    }
-
-    const requestId = feedbackSoundRequestRef.current + 1;
+    const { requestId, shouldPlaySound } = prepareFeedbackPlayback(
+      feedbackSoundRequestRef.current,
+      sfxEnabled
+    );
     feedbackSoundRequestRef.current = requestId;
+
+    if (!shouldPlaySound) {
+      return requestId;
+    }
 
     await stopTtsPlayback();
 
