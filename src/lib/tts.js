@@ -55,7 +55,8 @@ export function getTtsProviderStatus(provider) {
 const GOOGLE_TTS_AUDIO_ENCODING = 'MP3';
 const GOOGLE_TTS_DEFAULT_SPEAKING_RATE = 0.9;
 const GOOGLE_TTS_DEFAULT_PITCH = 1.0;
-const GOOGLE_TTS_DEFAULT_VOLUME_GAIN_DB = 6;
+const GOOGLE_TTS_DEFAULT_VOLUME_GAIN_DB = 10;
+const GOOGLE_TTS_WEB_PLAYBACK_GAIN_MULTIPLIER = 5;
 const GOOGLE_TTS_KOREAN_DEFAULT_VOICE = 'ko-KR-Wavenet-D';
 
 function buildGoogleTtsAudioConfig() {
@@ -326,7 +327,11 @@ export async function speakWithTts({ text, language, pitch, provider, rate, voic
 
       googlePlayer = createAudioPlayer(audioSource);
       if (googlePlayer) {
-        googlePlayer.volume = Number.isFinite(volume) ? Math.max(0, Math.min(1, volume)) : 1;
+        const requestedVolume = Number.isFinite(volume) ? Math.max(0, volume) : 1;
+        googlePlayer.volume =
+          Platform.OS === 'web'
+            ? requestedVolume * GOOGLE_TTS_WEB_PLAYBACK_GAIN_MULTIPLIER
+            : Math.min(1, requestedVolume);
       }
       if (googlePlayer?.play) {
         await googlePlayer.play();

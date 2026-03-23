@@ -36,7 +36,7 @@ describe('tts helpers', () => {
         audioEncoding: 'MP3',
         speakingRate: 0.9,
         pitch: 1.0,
-        volumeGainDb: 6,
+        volumeGainDb: 10,
       },
     });
   });

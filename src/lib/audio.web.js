@@ -1,49 +1,162 @@
 import { useEffect, useMemo, useRef } from 'react';
 
-const FEEDBACK_GAIN = 5;
+const FEEDBACK_GAIN = 2;
 
 export async function setAudioModeAsync() {}
 
 export function createAudioPlayer(source) {
-  let audio = null;
+  let fallbackAudio = null;
+  let audioContext = null;
+  let gainNode = null;
+  let sourceNode = null;
+  let audioBuffer = null;
+  let bufferPromise = null;
+  let seekOffset = 0;
   let audioSource = getAssetUri(source);
   let volume = 1;
 
-  const ensureAudio = () => {
+  const ensureContext = () => {
+    if (typeof window === 'undefined') {
+      return null;
+    }
+
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) {
+      return null;
+    }
+
+    if (!audioContext) {
+      audioContext = new AudioContextClass();
+      gainNode = audioContext.createGain();
+      gainNode.connect(audioContext.destination);
+    }
+
+    gainNode.gain.value = Number.isFinite(volume) ? Math.max(0, volume) : 1;
+    return audioContext;
+  };
+
+  const ensureFallbackAudio = () => {
     if (typeof window === 'undefined' || typeof window.Audio === 'undefined') {
       return null;
     }
 
-    if (!audio) {
-      audio = new window.Audio(audioSource || undefined);
-      audio.preload = 'auto';
+    if (!fallbackAudio) {
+      fallbackAudio = new window.Audio(audioSource || undefined);
+      fallbackAudio.preload = 'auto';
     }
 
-    audio.volume = volume;
+    fallbackAudio.volume = Math.min(1, Number.isFinite(volume) ? Math.max(0, volume) : 1);
+    return fallbackAudio;
+  };
 
-    return audio;
+  const loadBuffer = async () => {
+    if (!audioSource) {
+      return null;
+    }
+
+    if (audioBuffer) {
+      return audioBuffer;
+    }
+
+    if (bufferPromise) {
+      return bufferPromise;
+    }
+
+    const context = ensureContext();
+    if (!context) {
+      return null;
+    }
+
+    bufferPromise = fetch(audioSource)
+      .then((response) => response.arrayBuffer())
+      .then((arrayBuffer) => context.decodeAudioData(arrayBuffer))
+      .then((decodedBuffer) => {
+        audioBuffer = decodedBuffer;
+        return decodedBuffer;
+      })
+      .finally(() => {
+        bufferPromise = null;
+      });
+
+    return bufferPromise;
   };
 
   return {
     async play() {
-      const element = ensureAudio();
-      if (!element || !audioSource) {
+      if (!audioSource) {
         return;
       }
 
-      if (element.src !== audioSource) {
-        element.src = audioSource;
+      const context = ensureContext();
+      if (!context) {
+        const element = ensureFallbackAudio();
+        if (!element) {
+          return;
+        }
+        if (element.src !== audioSource) {
+          element.src = audioSource;
+        }
+        element.currentTime = Math.max(0, seekOffset);
+        await element.play().catch(() => {});
+        seekOffset = 0;
+        return;
       }
 
-      await element.play().catch(() => {});
+      const buffer = await loadBuffer().catch(() => null);
+      if (!buffer || !gainNode) {
+        const element = ensureFallbackAudio();
+        if (!element) {
+          return;
+        }
+        if (element.src !== audioSource) {
+          element.src = audioSource;
+        }
+        element.currentTime = Math.max(0, seekOffset);
+        await element.play().catch(() => {});
+        seekOffset = 0;
+        return;
+      }
+
+      if (context.state === 'suspended') {
+        await context.resume().catch(() => {});
+      }
+
+      if (sourceNode) {
+        try {
+          sourceNode.stop();
+        } catch {}
+        sourceNode.disconnect();
+      }
+
+      sourceNode = context.createBufferSource();
+      sourceNode.buffer = buffer;
+      sourceNode.connect(gainNode);
+      sourceNode.start(0, Math.max(0, seekOffset));
+      sourceNode.onended = () => {
+        if (sourceNode) {
+          sourceNode.disconnect();
+          sourceNode = null;
+        }
+      };
+      seekOffset = 0;
     },
     pause() {
-      audio?.pause();
+      if (sourceNode) {
+        try {
+          sourceNode.stop();
+        } catch {}
+        sourceNode.disconnect();
+        sourceNode = null;
+      }
+      fallbackAudio?.pause();
     },
     set volume(value) {
-      volume = Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 1;
-      if (audio) {
-        audio.volume = volume;
+      volume = Number.isFinite(value) ? Math.max(0, value) : 1;
+      if (gainNode) {
+        gainNode.gain.value = volume;
+      }
+      if (fallbackAudio) {
+        fallbackAudio.volume = Math.min(1, volume);
       }
     },
     get volume() {
@@ -51,32 +164,60 @@ export function createAudioPlayer(source) {
     },
     replace(nextSource) {
       audioSource = getAssetUri(nextSource);
-      if (!audio) {
-        return;
+      audioBuffer = null;
+      bufferPromise = null;
+      seekOffset = 0;
+
+      if (sourceNode) {
+        try {
+          sourceNode.stop();
+        } catch {}
+        sourceNode.disconnect();
+        sourceNode = null;
       }
 
-      audio.pause();
-      audio.src = audioSource || '';
-      audio.load();
+      if (fallbackAudio) {
+        fallbackAudio.pause();
+        fallbackAudio.src = audioSource || '';
+        fallbackAudio.load();
+      }
     },
     seekTo(seconds) {
-      if (!audio) {
-        return;
+      seekOffset = Number(seconds) || 0;
+      if (fallbackAudio) {
+        try {
+          fallbackAudio.currentTime = seekOffset;
+        } catch {}
       }
-
-      try {
-        audio.currentTime = Number(seconds) || 0;
-      } catch {}
     },
     remove() {
-      if (!audio) {
-        return;
+      if (sourceNode) {
+        try {
+          sourceNode.stop();
+        } catch {}
+        sourceNode.disconnect();
+        sourceNode = null;
       }
 
-      audio.pause();
-      audio.src = '';
-      audio.load();
-      audio = null;
+      if (gainNode) {
+        gainNode.disconnect();
+        gainNode = null;
+      }
+
+      if (audioContext) {
+        audioContext.close().catch(() => {});
+        audioContext = null;
+      }
+
+      if (fallbackAudio) {
+        fallbackAudio.pause();
+        fallbackAudio.src = '';
+        fallbackAudio.load();
+        fallbackAudio = null;
+      }
+
+      audioBuffer = null;
+      bufferPromise = null;
     },
   };
 }
