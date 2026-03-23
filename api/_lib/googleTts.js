@@ -279,7 +279,7 @@ function normalizePrivateKey(privateKey) {
   return String(privateKey || '').replace(/\\n/g, '\n');
 }
 
-function buildSpeechCacheKey(payload) {
+export function buildSpeechCacheKey(payload) {
   return JSON.stringify({
     text: payload?.input?.text || '',
     ssml: payload?.input?.ssml || '',
@@ -288,6 +288,7 @@ function buildSpeechCacheKey(payload) {
     audioEncoding: payload?.audioConfig?.audioEncoding || '',
     speakingRate: payload?.audioConfig?.speakingRate ?? '',
     pitch: payload?.audioConfig?.pitch ?? '',
+    volumeGainDb: payload?.audioConfig?.volumeGainDb ?? '',
   });
 }
 
