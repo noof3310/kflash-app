@@ -148,6 +148,54 @@ function Pressable({ style, onPressIn, onPressOut, pressScale = 0.982, ...props 
   );
 }
 
+function AutoFitChoiceText({ children, style, ...props }) {
+  const flattenedStyle = StyleSheet.flatten(style) || {};
+  const baseFontSize = flattenedStyle.fontSize || 16;
+  const baseLineHeight = flattenedStyle.lineHeight || Math.round(baseFontSize * 1.2);
+  const minimumScale = props.minimumFontScale || 0.6;
+  const [fontScale, setFontScale] = useState(1);
+
+  useEffect(() => {
+    setFontScale(1);
+  }, [children]);
+
+  const handleTextLayout = useCallback(
+    (event) => {
+      props.onTextLayout?.(event);
+
+      const lineCount = event?.nativeEvent?.lines?.length || 0;
+      if (lineCount <= (props.numberOfLines || 0) || fontScale <= minimumScale) {
+        return;
+      }
+
+      setFontScale((currentScale) => {
+        if (currentScale <= minimumScale) {
+          return currentScale;
+        }
+
+        return Math.max(minimumScale, Number((currentScale - 0.08).toFixed(2)));
+      });
+    },
+    [fontScale, minimumScale, props]
+  );
+
+  return (
+    <Text
+      {...props}
+      onTextLayout={handleTextLayout}
+      style={[
+        style,
+        {
+          fontSize: baseFontSize * fontScale,
+          lineHeight: Math.max(14, Math.round(baseLineHeight * fontScale)),
+        },
+      ]}
+    >
+      {children}
+    </Text>
+  );
+}
+
 export default function App() {
   if (Platform.OS === 'web') {
     return (
@@ -1536,8 +1584,9 @@ function AppShell({ storage }) {
                 onPress={() => handleAnswer(option)}
               >
                 <View style={styles.optionContentRow}>
-                  <Text
+                  <AutoFitChoiceText
                     numberOfLines={2}
+                    minimumFontScale={0.6}
                     style={[
                       styles.optionText,
                       styles.optionTextCompact,
@@ -1546,7 +1595,7 @@ function AppShell({ storage }) {
                     ]}
                   >
                     {option}
-                  </Text>
+                  </AutoFitChoiceText>
                   {ttsEnabled && currentItem.promptField === 'back' && option !== QUIZ_DONT_KNOW_OPTION ? (
                     <Pressable
                       style={[styles.optionSoundButton, { backgroundColor: colors.softAccent, borderColor: colors.border }]}
@@ -3304,7 +3353,7 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   optionButtonCompact: {
-    minHeight: 64,
+    height: 64,
     paddingVertical: 18,
     paddingHorizontal: 12
   },
@@ -3312,6 +3361,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    flex: 1,
   },
   optionText: {
     fontSize: 17,
