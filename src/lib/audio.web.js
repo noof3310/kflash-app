@@ -1,8 +1,56 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 const FEEDBACK_GAIN = 2;
+let webAudioForegroundVersion = 0;
+const webAudioForegroundListeners = new Set();
+let hasRegisteredWebAudioLifecycleListeners = false;
 
 export async function setAudioModeAsync() {}
+
+function notifyWebAudioForegroundRestore() {
+  webAudioForegroundVersion += 1;
+  webAudioForegroundListeners.forEach((listener) => {
+    try {
+      listener(webAudioForegroundVersion);
+    } catch {}
+  });
+}
+
+function ensureWebAudioLifecycleListeners() {
+  if (hasRegisteredWebAudioLifecycleListeners || typeof document === 'undefined' || typeof window === 'undefined') {
+    return;
+  }
+
+  const handleVisibilityChange = () => {
+    if (document.visibilityState === 'visible') {
+      notifyWebAudioForegroundRestore();
+    }
+  };
+
+  const handlePageShow = () => {
+    notifyWebAudioForegroundRestore();
+  };
+
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+  window.addEventListener('pageshow', handlePageShow);
+  hasRegisteredWebAudioLifecycleListeners = true;
+}
+
+function subscribeToWebAudioForegroundRestore(listener) {
+  ensureWebAudioLifecycleListeners();
+  webAudioForegroundListeners.add(listener);
+  return () => {
+    webAudioForegroundListeners.delete(listener);
+  };
+}
+
+function useWebAudioForegroundVersion() {
+  const [foregroundVersion, setForegroundVersion] = useState(webAudioForegroundVersion);
+
+  useEffect(() => subscribeToWebAudioForegroundRestore(setForegroundVersion), []);
+
+  return foregroundVersion;
+}
 
 export function createAudioPlayer(source) {
   let fallbackAudio = null;
@@ -14,10 +62,50 @@ export function createAudioPlayer(source) {
   let seekOffset = 0;
   let audioSource = getAssetUri(source);
   let volume = 1;
+  let foregroundVersion = webAudioForegroundVersion;
+
+  ensureWebAudioLifecycleListeners();
+
+  const cleanupContext = () => {
+    if (sourceNode) {
+      try {
+        sourceNode.stop();
+      } catch {}
+      sourceNode.disconnect();
+      sourceNode = null;
+    }
+
+    if (gainNode) {
+      gainNode.disconnect();
+      gainNode = null;
+    }
+
+    if (audioContext) {
+      audioContext.close().catch(() => {});
+      audioContext = null;
+    }
+  };
+
+  const resetAfterForegroundRestore = () => {
+    foregroundVersion = webAudioForegroundVersion;
+    cleanupContext();
+    audioBuffer = null;
+    bufferPromise = null;
+
+    if (fallbackAudio) {
+      fallbackAudio.pause();
+      fallbackAudio.src = audioSource || '';
+      fallbackAudio.load();
+    }
+  };
 
   const ensureContext = () => {
     if (typeof window === 'undefined') {
       return null;
+    }
+
+    if (foregroundVersion !== webAudioForegroundVersion) {
+      resetAfterForegroundRestore();
     }
 
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -191,23 +279,7 @@ export function createAudioPlayer(source) {
       }
     },
     remove() {
-      if (sourceNode) {
-        try {
-          sourceNode.stop();
-        } catch {}
-        sourceNode.disconnect();
-        sourceNode = null;
-      }
-
-      if (gainNode) {
-        gainNode.disconnect();
-        gainNode = null;
-      }
-
-      if (audioContext) {
-        audioContext.close().catch(() => {});
-        audioContext = null;
-      }
+      cleanupContext();
 
       if (fallbackAudio) {
         fallbackAudio.pause();
@@ -223,6 +295,7 @@ export function createAudioPlayer(source) {
 }
 
 export function useAudioPlayer(source) {
+  const foregroundVersion = useWebAudioForegroundVersion();
   const audioContextRef = useRef(null);
   const audioBufferRef = useRef(null);
   const sourceNodeRef = useRef(null);
@@ -278,7 +351,7 @@ export function useAudioPlayer(source) {
       audioContextRef.current = null;
       audioBufferRef.current = null;
     };
-  }, [assetUri]);
+  }, [assetUri, foregroundVersion]);
 
   return useMemo(
     () => ({
