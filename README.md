@@ -146,6 +146,35 @@ If they are missing, the app still works and falls back to in-memory cache only.
 
 If you use the split private key env var, keep the newline escapes as `\n`.
 
+### Recommended TTS API security
+
+`POST /api/google/speak` now includes:
+
+- per-IP rate limiting
+- text length validation
+- voice/language field validation
+- origin allowlist checks
+
+Defaults:
+
+- rate limit: `60` requests per `60` seconds per IP
+- max text length: `280` characters
+
+Optional security env var:
+
+- `ALLOWED_APP_ORIGINS`
+
+Example:
+
+```bash
+ALLOWED_APP_ORIGINS=https://your-domain.com,https://www.your-domain.com
+```
+
+Behavior:
+
+- requests with no `Origin` header are still allowed so native clients continue to work
+- browser requests with an `Origin` must either match the current host or be listed in `ALLOWED_APP_ORIGINS`
+
 ### App environment variables
 
 - Web on the same Vercel deployment defaults to `/api`, so no extra public env var is required.

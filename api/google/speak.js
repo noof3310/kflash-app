@@ -1,8 +1,12 @@
 import {
+  checkGoogleTtsRateLimit,
+  getGoogleTtsRequestLimits,
   handleOptions,
+  isAllowedSpeakOrigin,
   readJsonBody,
   sendJson,
   synthesizeGoogleSpeech,
+  validateGoogleSpeakPayload,
 } from '../_lib/googleTts.js';
 
 export default async function handler(req, res) {
@@ -16,14 +20,34 @@ export default async function handler(req, res) {
   }
 
   try {
-    const body = await readJsonBody(req);
-    const text = String(body?.input?.text || body?.text || '').trim();
-    if (!text) {
-      sendJson(res, 400, { error: 'Missing input.text for Google TTS synthesis.' });
+    if (!isAllowedSpeakOrigin(req)) {
+      sendJson(res, 403, { error: 'Origin is not allowed.' });
       return;
     }
 
-    const result = await synthesizeGoogleSpeech(body);
+    const rateLimit = await checkGoogleTtsRateLimit(req);
+    res.setHeader('X-RateLimit-Limit', String(rateLimit.limit));
+    res.setHeader('X-RateLimit-Remaining', String(Math.max(0, rateLimit.limit - rateLimit.count)));
+    res.setHeader('X-RateLimit-Window', String(rateLimit.windowSeconds));
+    if (!rateLimit.allowed) {
+      sendJson(res, 429, {
+        error: 'Too many TTS requests. Please slow down and try again shortly.',
+        rateLimit,
+      });
+      return;
+    }
+
+    const body = await readJsonBody(req);
+    const validation = validateGoogleSpeakPayload(body);
+    if (!validation.ok) {
+      sendJson(res, validation.statusCode, {
+        error: validation.error,
+        limits: getGoogleTtsRequestLimits(),
+      });
+      return;
+    }
+
+    const result = await synthesizeGoogleSpeech(validation.sanitizedBody);
     const payload = result?.payload || {};
     sendJson(res, 200, {
       audioContent: payload.audioContent || '',

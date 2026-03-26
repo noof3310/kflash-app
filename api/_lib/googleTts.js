@@ -13,6 +13,10 @@ const GOOGLE_BLOB_CACHE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 const GOOGLE_TTS_BLOB_PREFIX = 'tts-cache';
 const TTS_ANALYTICS_KEY_PREFIX = 'tts:analytics';
 const TTS_ANALYTICS_FIELDS = ['requests', 'memory_hit', 'persistent_hit', 'miss'];
+const GOOGLE_TTS_RATE_LIMIT_WINDOW_SECONDS = 60;
+const GOOGLE_TTS_RATE_LIMIT_MAX_REQUESTS = 60;
+const GOOGLE_TTS_MAX_TEXT_LENGTH = 280;
+const inMemoryRateLimitEntries = new Map();
 
 let cachedAccessToken = '';
 let cachedAccessTokenExpiresAt = 0;
@@ -129,6 +133,10 @@ export async function getGoogleTtsBackendStatus() {
       redisConfigured: isRedisConfigured(),
       blobConfigured: isBlobConfigured(),
       persistentCacheConfigured: isPersistentSpeechCacheConfigured(),
+      rateLimitConfigured: true,
+      rateLimitWindowSeconds: GOOGLE_TTS_RATE_LIMIT_WINDOW_SECONDS,
+      rateLimitMaxRequests: GOOGLE_TTS_RATE_LIMIT_MAX_REQUESTS,
+      maxTextLength: GOOGLE_TTS_MAX_TEXT_LENGTH,
     },
     cache: {
       inMemoryVoiceEntries: cachedVoicesByLanguage.size,
@@ -150,6 +158,139 @@ export function sendJson(res, statusCode, payload) {
   res.setHeader('Cache-Control', 'no-store');
   applyCorsHeaders(res);
   res.end(JSON.stringify(payload));
+}
+
+export function getGoogleTtsRequestLimits() {
+  return {
+    maxTextLength: GOOGLE_TTS_MAX_TEXT_LENGTH,
+    rateLimitWindowSeconds: GOOGLE_TTS_RATE_LIMIT_WINDOW_SECONDS,
+    rateLimitMaxRequests: GOOGLE_TTS_RATE_LIMIT_MAX_REQUESTS,
+  };
+}
+
+export function getRequestClientIp(req) {
+  const forwardedFor = req.headers?.['x-forwarded-for'];
+  if (typeof forwardedFor === 'string' && forwardedFor.trim()) {
+    return forwardedFor.split(',')[0].trim();
+  }
+
+  const realIp = req.headers?.['x-real-ip'];
+  if (typeof realIp === 'string' && realIp.trim()) {
+    return realIp.trim();
+  }
+
+  return 'unknown';
+}
+
+export function isAllowedSpeakOrigin(req) {
+  const origin = getRequestOrigin(req);
+  if (!origin) {
+    return true;
+  }
+
+  const originHost = getHostFromUrl(origin);
+  if (!originHost) {
+    return false;
+  }
+
+  const requestHost = String(req.headers?.['x-forwarded-host'] || req.headers?.host || '').trim().toLowerCase();
+  if (requestHost && originHost === requestHost) {
+    return true;
+  }
+
+  const allowedOrigins = getAllowedOriginList();
+  return allowedOrigins.includes(origin.toLowerCase());
+}
+
+export async function checkGoogleTtsRateLimit(req) {
+  const clientIp = getRequestClientIp(req);
+  const key = `tts:ratelimit:${clientIp}`;
+
+  if (isRedisConfigured()) {
+    try {
+      const incrementResponse = await upstashCommand(['INCR', key]);
+      const count = parseCounterValue(incrementResponse?.result);
+      if (count === 1) {
+        await upstashCommand(['EXPIRE', key, GOOGLE_TTS_RATE_LIMIT_WINDOW_SECONDS]);
+      }
+
+      return {
+        allowed: count <= GOOGLE_TTS_RATE_LIMIT_MAX_REQUESTS,
+        count,
+        limit: GOOGLE_TTS_RATE_LIMIT_MAX_REQUESTS,
+        windowSeconds: GOOGLE_TTS_RATE_LIMIT_WINDOW_SECONDS,
+      };
+    } catch {
+      return {
+        allowed: true,
+        count: 0,
+        limit: GOOGLE_TTS_RATE_LIMIT_MAX_REQUESTS,
+        windowSeconds: GOOGLE_TTS_RATE_LIMIT_WINDOW_SECONDS,
+      };
+    }
+  }
+
+  const now = Date.now();
+  const existingEntry = inMemoryRateLimitEntries.get(key);
+  if (!existingEntry || existingEntry.expiresAt <= now) {
+    inMemoryRateLimitEntries.set(key, {
+      count: 1,
+      expiresAt: now + GOOGLE_TTS_RATE_LIMIT_WINDOW_SECONDS * 1000,
+    });
+    trimInMemoryRateLimitEntries(now);
+    return {
+      allowed: true,
+      count: 1,
+      limit: GOOGLE_TTS_RATE_LIMIT_MAX_REQUESTS,
+      windowSeconds: GOOGLE_TTS_RATE_LIMIT_WINDOW_SECONDS,
+    };
+  }
+
+  existingEntry.count += 1;
+  trimInMemoryRateLimitEntries(now);
+  return {
+    allowed: existingEntry.count <= GOOGLE_TTS_RATE_LIMIT_MAX_REQUESTS,
+    count: existingEntry.count,
+    limit: GOOGLE_TTS_RATE_LIMIT_MAX_REQUESTS,
+    windowSeconds: GOOGLE_TTS_RATE_LIMIT_WINDOW_SECONDS,
+  };
+}
+
+export function validateGoogleSpeakPayload(body) {
+  const text = String(body?.input?.text || body?.text || '').trim();
+  if (!text) {
+    return { ok: false, statusCode: 400, error: 'Missing input.text for Google TTS synthesis.' };
+  }
+
+  if (text.length > GOOGLE_TTS_MAX_TEXT_LENGTH) {
+    return {
+      ok: false,
+      statusCode: 400,
+      error: `input.text is too long. Maximum ${GOOGLE_TTS_MAX_TEXT_LENGTH} characters.`,
+    };
+  }
+
+  const languageCode = body?.voice?.languageCode;
+  if (languageCode != null && !isSafeVoiceField(languageCode, 20)) {
+    return { ok: false, statusCode: 400, error: 'voice.languageCode is invalid.' };
+  }
+
+  const voiceName = body?.voice?.name;
+  if (voiceName != null && !isSafeVoiceField(voiceName, 80)) {
+    return { ok: false, statusCode: 400, error: 'voice.name is invalid.' };
+  }
+
+  return {
+    ok: true,
+    sanitizedBody: {
+      input: { text },
+      voice: {
+        languageCode: typeof languageCode === 'string' && languageCode.trim() ? languageCode.trim() : undefined,
+        name: typeof voiceName === 'string' && voiceName.trim() ? voiceName.trim() : undefined,
+      },
+      audioConfig: body?.audioConfig && typeof body.audioConfig === 'object' ? body.audioConfig : undefined,
+    },
+  };
 }
 
 export async function readJsonBody(req) {
@@ -492,4 +633,55 @@ function parseCounterValue(value) {
 
 function roundRatio(value) {
   return Math.round(value * 1000) / 1000;
+}
+
+function getRequestOrigin(req) {
+  const origin = req.headers?.origin;
+  if (typeof origin === 'string' && origin.trim()) {
+    return origin.trim();
+  }
+
+  const referer = req.headers?.referer;
+  if (typeof referer === 'string' && referer.trim()) {
+    try {
+      const parsed = new URL(referer);
+      return parsed.origin;
+    } catch {
+      return '';
+    }
+  }
+
+  return '';
+}
+
+function getHostFromUrl(value) {
+  try {
+    return new URL(value).host.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function getAllowedOriginList() {
+  return String(process.env.ALLOWED_APP_ORIGINS || '')
+    .split(',')
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function isSafeVoiceField(value, maxLength) {
+  if (typeof value !== 'string') {
+    return false;
+  }
+
+  const trimmedValue = value.trim();
+  return trimmedValue.length > 0 && trimmedValue.length <= maxLength && /^[a-zA-Z0-9._-]+$/.test(trimmedValue);
+}
+
+function trimInMemoryRateLimitEntries(now = Date.now()) {
+  for (const [key, entry] of inMemoryRateLimitEntries.entries()) {
+    if (entry.expiresAt <= now) {
+      inMemoryRateLimitEntries.delete(key);
+    }
+  }
 }
