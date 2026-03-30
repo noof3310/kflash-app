@@ -139,7 +139,7 @@ export function getAccuracyTone(accuracy, colors) {
     return null;
   }
 
-  if (accuracy >= 90) {
+  if (accuracy >= 85) {
     return {
       backgroundColor: colors.correctBackground,
       borderColor: colors.correctBorder,

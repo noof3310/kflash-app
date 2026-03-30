@@ -507,7 +507,7 @@ function AppShell({ storage }) {
       }).length,
       strongCount: reviewCards.filter((item) => {
         const accuracy = getCardAccuracyPercent(item);
-        return accuracy !== null && accuracy >= 90;
+        return accuracy !== null && accuracy >= 85;
       }).length,
     }),
     [reviewCards]
@@ -556,7 +556,7 @@ function AppShell({ storage }) {
       incorrectCount: answers.filter((item) => !item.isCorrect).length,
       strongCount: resultCards.filter((item) => {
         const accuracy = getCardAccuracyPercent(item);
-        return accuracy !== null && accuracy >= 90;
+        return accuracy !== null && accuracy >= 85;
       }).length,
       weakCount: resultCards.filter((item) => {
         const accuracy = getCardAccuracyPercent(item);

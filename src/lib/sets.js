@@ -69,7 +69,7 @@ export function filterAndSortSets(sets, options = {}) {
     }
 
     if (setFilter === 'strong') {
-      return (Number(item.quiz_count) || 0) > 0 && averageScorePercent >= 90;
+      return (Number(item.quiz_count) || 0) > 0 && averageScorePercent >= 85;
     }
 
     return true;
