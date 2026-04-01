@@ -2122,6 +2122,149 @@ function AppShell({ storage }) {
     );
   }
 
+  if (screen === 'duplicates') {
+    return (
+      <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.screenBackground }]}>
+        <StatusBar style={statusBarStyle} />
+        <AnimatedScrollView
+          style={animatedScreenStyle}
+          contentContainerStyle={styles.container}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.quizHeaderRow}>
+            <Pressable
+              style={[styles.secondaryButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+              onPress={() => setScreen('home')}
+            >
+              <Text style={[styles.secondaryButtonText, { color: colors.primaryText }]}>Back</Text>
+            </Pressable>
+          </View>
+
+          <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>Manage duplicate fronts</Text>
+            <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
+              Fix cards that share the same front. You can rename fronts to make them distinct, or keep one back and merge the rest into a single card.
+            </Text>
+          </View>
+
+          {duplicateFrontGroups.length === 0 ? (
+            <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
+                No duplicate fronts found right now.
+              </Text>
+            </View>
+          ) : (
+            duplicateFrontGroups.map((group) => {
+              const selectedMergeTargetId = Number(duplicateMergeTargets[group.key] || group.cards[0]?.id || 0);
+              const mergeBusy = duplicateActionKey === `merge-${group.key}`;
+
+              return (
+                <View
+                  key={group.key}
+                  style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                >
+                  <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>{group.front}</Text>
+                  <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
+                    {group.cards.length} cards share this front.
+                  </Text>
+
+                  {group.cards.map((card) => {
+                    const renameBusy = duplicateActionKey === `rename-${card.id}`;
+                    const draftFront = duplicateFrontDrafts[card.id] ?? card.front;
+                    const isSelectedMergeTarget = selectedMergeTargetId === card.id;
+
+                    return (
+                      <View
+                        key={card.id}
+                        style={[
+                          styles.duplicateCardRow,
+                          { backgroundColor: colors.elevatedSurface, borderColor: colors.border },
+                        ]}
+                      >
+                        <View style={styles.duplicateCardHeader}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={[styles.cardBack, { color: colors.primaryText }]}>{card.back}</Text>
+                            <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
+                              {card.set_count || 0} sets
+                              {formatReviewStats(card) ? ` • ${formatReviewStats(card)}` : ''}
+                            </Text>
+                          </View>
+                          <Pressable
+                            style={[
+                              styles.filterChip,
+                              { backgroundColor: colors.softSurface, borderColor: colors.border },
+                              isSelectedMergeTarget && {
+                                backgroundColor: colors.primaryText,
+                                borderColor: colors.primaryText,
+                              },
+                            ]}
+                            onPress={() =>
+                              setDuplicateMergeTargets((prev) => ({
+                                ...prev,
+                                [group.key]: card.id,
+                              }))
+                            }
+                          >
+                            <Text
+                              style={[
+                                styles.filterChipText,
+                                { color: isSelectedMergeTarget ? colors.surface : colors.primaryText },
+                              ]}
+                            >
+                              {isSelectedMergeTarget ? 'Keep this card' : 'Keep this'}
+                            </Text>
+                          </Pressable>
+                        </View>
+
+                        <TextInput
+                          value={draftFront}
+                          onChangeText={(value) => updateDuplicateFrontDraft(card.id, value)}
+                          placeholder="Edit front"
+                          placeholderTextColor={colors.secondaryText}
+                          style={[
+                            styles.input,
+                            {
+                              borderColor: colors.border,
+                              backgroundColor: colors.inputBackground,
+                              color: colors.primaryText,
+                            },
+                          ]}
+                        />
+
+                        <Pressable
+                          style={[
+                            styles.secondaryButton,
+                            { backgroundColor: colors.surface, borderColor: colors.border },
+                          ]}
+                          onPress={() => handleSaveDuplicateFront(card)}
+                          disabled={renameBusy || String(draftFront).trim() === card.front}
+                        >
+                          <Text style={[styles.secondaryButtonText, { color: colors.primaryText }]}>
+                            {renameBusy ? 'Saving...' : 'Save front'}
+                          </Text>
+                        </Pressable>
+                      </View>
+                    );
+                  })}
+
+                  <Pressable
+                    style={[styles.primaryButton, { backgroundColor: colors.primaryButton }]}
+                    onPress={() => handleMergeDuplicateGroup(group)}
+                    disabled={mergeBusy}
+                  >
+                    <Text style={[styles.primaryButtonText, { color: colors.primaryButtonText }]}>
+                      {mergeBusy ? 'Merging...' : 'Merge into selected card'}
+                    </Text>
+                  </Pressable>
+                </View>
+              );
+            })
+          )}
+        </AnimatedScrollView>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.screenBackground }]}>
       <StatusBar style={statusBarStyle} />
@@ -2581,6 +2724,14 @@ function AppShell({ storage }) {
         </Text>
         <Pressable
           style={[styles.secondaryButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+          onPress={() => setScreen('duplicates')}
+        >
+          <Text style={[styles.secondaryButtonText, { color: colors.primaryText }]}>
+            Manage duplicate fronts {duplicateFrontGroups.length ? `(${duplicateFrontGroups.length})` : ''}
+          </Text>
+        </Pressable>
+        <Pressable
+          style={[styles.secondaryButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
           onPress={handleExportLearningProgress}
         >
           <Text style={[styles.secondaryButtonText, { color: colors.primaryText }]}>Export learning progress</Text>
@@ -2672,6 +2823,44 @@ function getSetReviewTone(set, colors) {
   }
 
   return getAccuracyTone(Number(set.average_score_percent), colors);
+}
+
+function buildDuplicateFrontGroups(cards) {
+  const groups = new Map();
+
+  for (const card of cards ?? []) {
+    const key = normalizeDuplicateFrontKey(card?.front);
+    if (!key) {
+      continue;
+    }
+
+    const current = groups.get(key) ?? {
+      key,
+      front: String(card.front || '').trim(),
+      cards: [],
+    };
+    current.cards.push(card);
+    groups.set(key, current);
+  }
+
+  return Array.from(groups.values())
+    .filter((group) => group.cards.length > 1)
+    .map((group) => ({
+      ...group,
+      cards: [...group.cards].sort((left, right) => {
+        const typeComparison = String(left.type || '').localeCompare(String(right.type || ''));
+        if (typeComparison !== 0) {
+          return typeComparison;
+        }
+
+        return String(left.back || '').localeCompare(String(right.back || ''));
+      }),
+    }))
+    .sort((left, right) => left.front.localeCompare(right.front));
+}
+
+function normalizeDuplicateFrontKey(value) {
+  return String(value || '').trim().toLowerCase();
 }
 
 function getCardAccuracyPercent(card) {
@@ -3289,6 +3478,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#64748b',
     marginTop: 2,
+  },
+  duplicateCardRow: {
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 12,
+    gap: 10,
+  },
+  duplicateCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
   },
   reviewStatText: {
     fontSize: 12,
