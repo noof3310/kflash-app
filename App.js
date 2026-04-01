@@ -249,6 +249,9 @@ function AppShell({ storage }) {
   const [setFilter, setSetFilter] = useState('all');
   const [setSort, setSetSort] = useState('priority');
   const [showAllSets, setShowAllSets] = useState(false);
+  const [duplicateFrontDrafts, setDuplicateFrontDrafts] = useState({});
+  const [duplicateMergeTargets, setDuplicateMergeTargets] = useState({});
+  const [duplicateActionKey, setDuplicateActionKey] = useState('');
   const [ttsRate, setTtsRate] = useState(DEFAULT_TTS_RATE);
   const [ttsPitch, setTtsPitch] = useState(DEFAULT_TTS_PITCH);
   const [ttsVoice, setTtsVoice] = useState(DEFAULT_TTS_VOICE);
@@ -457,6 +460,7 @@ function AppShell({ storage }) {
   }, [filteredSets, normalizedSetSearchQuery, showAllSets]);
   const hasMoreSetsToShow = !normalizedSetSearchQuery && filteredSets.length > HOME_SET_PREVIEW_COUNT;
   const prioritizedCards = useMemo(() => sortCardsForStudy(cards), [cards]);
+  const duplicateFrontGroups = useMemo(() => buildDuplicateFrontGroups(cards), [cards]);
   const visibleCards = useMemo(() => prioritizedCards.slice(0, 30), [prioritizedCards]);
   const prioritizedReviewCards = useMemo(() => sortCardsForStudy(reviewCards), [reviewCards]);
   const selectedSetSummary = useMemo(
@@ -654,6 +658,29 @@ function AppShell({ storage }) {
 
     return undefined;
   }, [debugCountryFilter, debugCountryOptions]);
+
+  useEffect(() => {
+    setDuplicateMergeTargets((prev) => {
+      const next = { ...prev };
+      let changed = false;
+
+      for (const group of duplicateFrontGroups) {
+        if (!next[group.key] || !group.cards.some((card) => card.id === next[group.key])) {
+          next[group.key] = group.cards[0]?.id;
+          changed = true;
+        }
+      }
+
+      for (const key of Object.keys(next)) {
+        if (!duplicateFrontGroups.some((group) => group.key === key)) {
+          delete next[key];
+          changed = true;
+        }
+      }
+
+      return changed ? next : prev;
+    });
+  }, [duplicateFrontGroups]);
   const animatedScreenStyle = {
     opacity: screenOpacity,
     transform: [{ translateY: screenTranslateY }],
@@ -1073,6 +1100,83 @@ function AppShell({ storage }) {
       prev.includes(setId) ? prev.filter((id) => id !== setId) : [...prev, setId]
     );
   };
+
+  const updateDuplicateFrontDraft = useCallback((cardId, value) => {
+    setDuplicateFrontDrafts((prev) => ({
+      ...prev,
+      [cardId]: value,
+    }));
+  }, []);
+
+  const handleSaveDuplicateFront = useCallback(
+    async (card) => {
+      const nextFront = String(duplicateFrontDrafts[card.id] ?? card.front).trim();
+      if (!nextFront || nextFront === card.front) {
+        return;
+      }
+
+      setDuplicateActionKey(`rename-${card.id}`);
+      try {
+        await storage.renameCardFront(card.id, nextFront);
+        setDuplicateFrontDrafts((prev) => {
+          const next = { ...prev };
+          delete next[card.id];
+          return next;
+        });
+        await refreshAll();
+        showAlert('Front updated', `Updated "${card.front}" to "${nextFront}".`);
+      } catch (error) {
+        showAlert('Could not update front', error?.message ?? 'Something went wrong while renaming the card front.');
+      } finally {
+        setDuplicateActionKey('');
+      }
+    },
+    [duplicateFrontDrafts, refreshAll, storage]
+  );
+
+  const handleMergeDuplicateGroup = useCallback(
+    (group) => {
+      const targetCardId = Number(duplicateMergeTargets[group.key] || group.cards[0]?.id || 0);
+      const targetCard = group.cards.find((item) => item.id === targetCardId);
+      const sourceCards = group.cards.filter((item) => item.id !== targetCardId);
+
+      if (!targetCard || !sourceCards.length) {
+        showAlert('Choose a card to keep', 'Pick one card to keep, then merge the other duplicate cards into it.');
+        return;
+      }
+
+      showConfirm({
+        title: 'Merge duplicate fronts?',
+        message: `This will keep "${targetCard.back}" and merge ${sourceCards.length} other card(s) into it. Set links, quiz history, and progress will move to the kept card.`,
+        confirmText: 'Merge cards',
+        destructive: true,
+        onConfirm: async () => {
+          setDuplicateActionKey(`merge-${group.key}`);
+          try {
+            for (const sourceCard of sourceCards) {
+              await storage.mergeCards({
+                sourceCardId: sourceCard.id,
+                targetCardId,
+              });
+            }
+
+            setDuplicateMergeTargets((prev) => {
+              const next = { ...prev };
+              delete next[group.key];
+              return next;
+            });
+            await refreshAll();
+            showAlert('Cards merged', `Merged ${sourceCards.length} duplicate card(s) into "${targetCard.back}".`);
+          } catch (error) {
+            showAlert('Could not merge cards', error?.message ?? 'Something went wrong while merging duplicate cards.');
+          } finally {
+            setDuplicateActionKey('');
+          }
+        },
+      });
+    },
+    [duplicateMergeTargets, refreshAll, storage]
+  );
 
   const speakText = useCallback(
     (text, overrides = {}) => {

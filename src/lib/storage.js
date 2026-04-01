@@ -305,6 +305,62 @@ export function createNativeStorage(db) {
 
       await migrateDbIfNeeded(db);
     },
+
+    async renameCardFront(cardId, nextFront) {
+      const normalizedFront = String(nextFront || '').trim();
+      if (!normalizedFront) {
+        throw new Error('Front is required.');
+      }
+
+      const existingCard = await db.getFirstAsync(
+        'SELECT id, type, back FROM cards WHERE id = ? LIMIT 1',
+        [cardId]
+      );
+
+      if (!existingCard) {
+        throw new Error('Card not found.');
+      }
+
+      const duplicateCard = await db.getFirstAsync(
+        'SELECT id FROM cards WHERE front = ? AND type = ? AND back = ? AND id != ? LIMIT 1',
+        [normalizedFront, existingCard.type, existingCard.back, cardId]
+      );
+
+      if (duplicateCard) {
+        throw new Error('Another card already uses that front, type, and back.');
+      }
+
+      await db.runAsync('UPDATE cards SET front = ? WHERE id = ?', [normalizedFront, cardId]);
+    },
+
+    async mergeCards({ sourceCardId, targetCardId }) {
+      const sourceId = Number(sourceCardId);
+      const targetId = Number(targetCardId);
+      if (!sourceId || !targetId || sourceId === targetId) {
+        throw new Error('Choose two different cards to merge.');
+      }
+
+      await db.withTransactionAsync(async () => {
+        const [sourceCard, targetCard] = await Promise.all([
+          db.getFirstAsync('SELECT id FROM cards WHERE id = ? LIMIT 1', [sourceId]),
+          db.getFirstAsync('SELECT id FROM cards WHERE id = ? LIMIT 1', [targetId]),
+        ]);
+
+        if (!sourceCard || !targetCard) {
+          throw new Error('One of the cards could not be found.');
+        }
+
+        await db.runAsync(
+          `INSERT OR IGNORE INTO set_cards (set_id, card_id)
+           SELECT set_id, ? FROM set_cards WHERE card_id = ?`,
+          [targetId, sourceId]
+        );
+
+        await db.runAsync('UPDATE quiz_answers SET card_id = ? WHERE card_id = ?', [targetId, sourceId]);
+        await mergeNativeCardProgress(db, sourceId, targetId);
+        await db.runAsync('DELETE FROM cards WHERE id = ?', [sourceId]);
+      });
+    },
   };
 }
 
@@ -587,6 +643,74 @@ export function createWebStorage() {
 
     async resetSchema() {
       writeWebStore(getInitialWebStore());
+    },
+
+    async renameCardFront(cardId, nextFront) {
+      const normalizedFront = String(nextFront || '').trim();
+      if (!normalizedFront) {
+        throw new Error('Front is required.');
+      }
+
+      const store = readWebStore();
+      const cardRecord = store.cards.find((item) => Number(item.id) === Number(cardId));
+      if (!cardRecord) {
+        throw new Error('Card not found.');
+      }
+
+      const hasDuplicate = store.cards.some(
+        (item) =>
+          Number(item.id) !== Number(cardId) &&
+          item.front === normalizedFront &&
+          item.type === cardRecord.type &&
+          item.back === cardRecord.back
+      );
+
+      if (hasDuplicate) {
+        throw new Error('Another card already uses that front, type, and back.');
+      }
+
+      cardRecord.front = normalizedFront;
+      writeWebStore(store);
+    },
+
+    async mergeCards({ sourceCardId, targetCardId }) {
+      const sourceId = Number(sourceCardId);
+      const targetId = Number(targetCardId);
+      if (!sourceId || !targetId || sourceId === targetId) {
+        throw new Error('Choose two different cards to merge.');
+      }
+
+      const store = readWebStore();
+      const sourceCard = store.cards.find((item) => Number(item.id) === sourceId);
+      const targetCard = store.cards.find((item) => Number(item.id) === targetId);
+      if (!sourceCard || !targetCard) {
+        throw new Error('One of the cards could not be found.');
+      }
+
+      const existingSetPairs = new Set(
+        store.setCards.map((item) => `${Number(item.set_id)}::${Number(item.card_id)}`)
+      );
+
+      for (const relation of store.setCards.filter((item) => Number(item.card_id) === sourceId)) {
+        const nextKey = `${Number(relation.set_id)}::${targetId}`;
+        if (!existingSetPairs.has(nextKey)) {
+          store.setCards.push({
+            set_id: Number(relation.set_id),
+            card_id: targetId,
+          });
+          existingSetPairs.add(nextKey);
+        }
+      }
+
+      store.quizAnswers = store.quizAnswers.map((answer) =>
+        Number(answer.card_id) === sourceId ? { ...answer, card_id: targetId } : answer
+      );
+
+      mergeWebCardProgress(store, sourceId, targetId);
+
+      store.setCards = store.setCards.filter((item) => Number(item.card_id) !== sourceId);
+      store.cards = store.cards.filter((item) => Number(item.id) !== sourceId);
+      writeWebStore(store);
     },
   };
 }
@@ -919,6 +1043,89 @@ function getNextIntervalDays(streak, previousIntervalDays) {
   }
 
   return Math.min(60, Math.max(14, previousIntervalDays * 2));
+}
+
+async function mergeNativeCardProgress(db, sourceCardId, targetCardId) {
+  const rows = await db.getAllAsync(
+    'SELECT card_id, last_reviewed_at, next_due_at, correct_streak, interval_days FROM card_progress WHERE card_id IN (?, ?)',
+    [sourceCardId, targetCardId]
+  );
+
+  const sourceProgress = rows.find((row) => Number(row.card_id) === Number(sourceCardId));
+  const targetProgress = rows.find((row) => Number(row.card_id) === Number(targetCardId));
+  const mergedProgress = mergeCardProgressRows(sourceProgress, targetProgress);
+
+  if (mergedProgress) {
+    await db.runAsync(
+      `INSERT INTO card_progress (card_id, last_reviewed_at, next_due_at, correct_streak, interval_days)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(card_id) DO UPDATE SET
+         last_reviewed_at = excluded.last_reviewed_at,
+         next_due_at = excluded.next_due_at,
+         correct_streak = excluded.correct_streak,
+         interval_days = excluded.interval_days`,
+      [
+        targetCardId,
+        mergedProgress.last_reviewed_at,
+        mergedProgress.next_due_at,
+        mergedProgress.correct_streak,
+        mergedProgress.interval_days,
+      ]
+    );
+  }
+
+  await db.runAsync('DELETE FROM card_progress WHERE card_id = ?', [sourceCardId]);
+}
+
+function mergeWebCardProgress(store, sourceCardId, targetCardId) {
+  const sourceProgress = store.cardProgress.find((item) => Number(item.card_id) === Number(sourceCardId));
+  const targetProgress = store.cardProgress.find((item) => Number(item.card_id) === Number(targetCardId));
+  const mergedProgress = mergeCardProgressRows(sourceProgress, targetProgress);
+
+  store.cardProgress = store.cardProgress.filter((item) => Number(item.card_id) !== Number(sourceCardId));
+
+  if (!mergedProgress) {
+    return;
+  }
+
+  const targetIndex = store.cardProgress.findIndex((item) => Number(item.card_id) === Number(targetCardId));
+  const nextRecord = {
+    card_id: Number(targetCardId),
+    ...mergedProgress,
+  };
+
+  if (targetIndex >= 0) {
+    store.cardProgress[targetIndex] = nextRecord;
+  } else {
+    store.cardProgress.push(nextRecord);
+  }
+}
+
+function mergeCardProgressRows(sourceProgress, targetProgress) {
+  if (!sourceProgress && !targetProgress) {
+    return null;
+  }
+
+  const rows = [sourceProgress, targetProgress].filter(Boolean);
+  const sortedDueDates = rows
+    .map((row) => row.next_due_at)
+    .filter(Boolean)
+    .map((value) => ({ raw: value, time: Date.parse(value) }))
+    .filter((item) => Number.isFinite(item.time))
+    .sort((left, right) => left.time - right.time);
+  const sortedReviewDates = rows
+    .map((row) => row.last_reviewed_at)
+    .filter(Boolean)
+    .map((value) => ({ raw: value, time: Date.parse(value) }))
+    .filter((item) => Number.isFinite(item.time))
+    .sort((left, right) => right.time - left.time);
+
+  return {
+    last_reviewed_at: sortedReviewDates[0]?.raw || null,
+    next_due_at: sortedDueDates[0]?.raw || null,
+    correct_streak: Math.min(...rows.map((row) => Number(row.correct_streak) || 0)),
+    interval_days: Math.min(...rows.map((row) => Number(row.interval_days) || 0)),
+  };
 }
 
 function createImportLookupContext(db) {
