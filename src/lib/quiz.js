@@ -14,29 +14,28 @@ export function getStudyPriorityMetrics(card) {
   const hasBeenReviewed = Boolean(card?.last_reviewed_at);
   const dueAtMs = card?.next_due_at ? Date.parse(card.next_due_at) : Number.NaN;
   const isDueNow = hasBeenReviewed && Number.isFinite(dueAtMs) ? dueAtMs <= Date.now() : false;
+  const isNewCard = attempts === 0;
+  const noveltyFactor = 1 / Math.sqrt(attempts + 1);
+  const weaknessFactor = 0.35 + Math.pow(1 - accuracy, 1.4);
+  const dueFactor = isDueNow ? 2.2 : isNewCard ? 1.3 : 1.0;
+  const priorityScore = noveltyFactor * weaknessFactor * dueFactor;
 
   return {
     attempts,
     accuracy,
     hasBeenReviewed,
     isDueNow,
+    isNewCard,
+    noveltyFactor,
+    weaknessFactor,
+    dueFactor,
+    priorityScore,
   };
 }
 
 export function getProgressiveLearningWeight(card) {
-  const { attempts, accuracy, isDueNow } = getStudyPriorityMetrics(card);
-
-  if (attempts === 0) {
-    return 1200;
-  }
-
-  if (isDueNow) {
-    return 900 + (1 - accuracy) * 100;
-  }
-
-  const accuracyWeight = (1 - accuracy) * 100;
-  const attemptsWeight = 10 / (1 + attempts);
-  return Math.max(0.1, accuracyWeight + attemptsWeight);
+  const { priorityScore } = getStudyPriorityMetrics(card);
+  return Math.max(0.0001, priorityScore);
 }
 
 export function pickWeightedQuizCard(cards) {
@@ -252,33 +251,27 @@ export function pickWeightedCardByWeight(weightedCards) {
 
 export function sortCardsForStudy(cards) {
   return shuffleArray(cards ?? []).sort((left, right) => {
-    const {
-      attempts: leftAttempts,
-      accuracy: leftAccuracy,
-      isDueNow: leftIsDueNow,
-    } = getStudyPriorityMetrics(left);
-    const {
-      attempts: rightAttempts,
-      accuracy: rightAccuracy,
-      isDueNow: rightIsDueNow,
-    } = getStudyPriorityMetrics(right);
-    const leftZeroPlay = leftAttempts === 0 ? 0 : 1;
-    const rightZeroPlay = rightAttempts === 0 ? 0 : 1;
+    const leftMetrics = getStudyPriorityMetrics(left);
+    const rightMetrics = getStudyPriorityMetrics(right);
 
-    if (leftZeroPlay !== rightZeroPlay) {
-      return leftZeroPlay - rightZeroPlay;
+    if (leftMetrics.priorityScore !== rightMetrics.priorityScore) {
+      return rightMetrics.priorityScore - leftMetrics.priorityScore;
     }
 
-    if (leftZeroPlay === 1 && leftIsDueNow !== rightIsDueNow) {
-      return leftIsDueNow ? -1 : 1;
+    if (leftMetrics.isDueNow !== rightMetrics.isDueNow) {
+      return leftMetrics.isDueNow ? -1 : 1;
     }
 
-    if (leftAccuracy !== rightAccuracy) {
-      return leftAccuracy - rightAccuracy;
+    if (leftMetrics.isNewCard !== rightMetrics.isNewCard) {
+      return leftMetrics.isNewCard ? -1 : 1;
     }
 
-    if (leftAttempts !== rightAttempts) {
-      return leftAttempts - rightAttempts;
+    if (leftMetrics.accuracy !== rightMetrics.accuracy) {
+      return leftMetrics.accuracy - rightMetrics.accuracy;
+    }
+
+    if (leftMetrics.attempts !== rightMetrics.attempts) {
+      return leftMetrics.attempts - rightMetrics.attempts;
     }
 
     return 0;

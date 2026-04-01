@@ -59,6 +59,24 @@ describe('quiz helpers', () => {
     expect(dueWeight).toBeGreaterThan(stableWeight);
   });
 
+  test('multiplicative score favors lightly reviewed perfect cards over heavily reviewed 80 percent cards', () => {
+    const experiencedButWeakWeight = getProgressiveLearningWeight({
+      attempt_count: 20,
+      correct_count: 16,
+      last_reviewed_at: '2026-03-18T00:00:00.000Z',
+      next_due_at: '2026-03-25T00:00:00.000Z',
+    });
+
+    const lightlyReviewedPerfectWeight = getProgressiveLearningWeight({
+      attempt_count: 2,
+      correct_count: 2,
+      last_reviewed_at: '2026-03-18T00:00:00.000Z',
+      next_due_at: '2026-03-25T00:00:00.000Z',
+    });
+
+    expect(lightlyReviewedPerfectWeight).toBeGreaterThan(experiencedButWeakWeight);
+  });
+
   test('buildLiveReviewCards updates attempts, streak, and due state immediately', () => {
     const [updatedCard] = buildLiveReviewCards(
       [
