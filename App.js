@@ -1031,6 +1031,37 @@ function AppShell({ storage }) {
     }
   };
 
+  const handleExportVocabulary = async () => {
+    try {
+      const rows = await storage.exportVocabularyRows();
+
+      if (!rows.length) {
+        showAlert('Nothing to export', 'There are no vocabulary cards to export yet.');
+        return;
+      }
+
+      const csvText = Papa.unparse(rows);
+      const filename = `vocabulary-${new Date().toISOString().slice(0, 10)}.csv`;
+
+      if (Platform.OS === 'web') {
+        downloadCsvOnWeb(filename, csvText);
+        showAlert('Export ready', 'Your vocabulary CSV has been downloaded.');
+        return;
+      }
+
+      const documentDirectory = FileSystem.documentDirectory || FileSystem.cacheDirectory;
+      if (!documentDirectory) {
+        throw new Error('No writable export directory is available on this device.');
+      }
+
+      const fileUri = `${documentDirectory}${filename}`;
+      await FileSystem.writeAsStringAsync(fileUri, csvText);
+      showAlert('Export saved', `Vocabulary exported to:\n\n${fileUri}`);
+    } catch (error) {
+      showAlert('Export failed', error?.message ?? 'Could not export vocabulary.');
+    }
+  };
+
   const handleImportLearningProgress = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
@@ -2722,6 +2753,12 @@ function AppShell({ storage }) {
         <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
           Export or restore your card-level learning progress as a CSV backup.
         </Text>
+        <Pressable
+          style={[styles.secondaryButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+          onPress={handleExportVocabulary}
+        >
+          <Text style={[styles.secondaryButtonText, { color: colors.primaryText }]}>Export vocabulary CSV</Text>
+        </Pressable>
         <Pressable
           style={[styles.secondaryButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
           onPress={() => setScreen('duplicates')}
