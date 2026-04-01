@@ -187,6 +187,18 @@ export function createNativeStorage(db) {
       return buildExportRows(rows ?? []);
     },
 
+    async exportVocabularyRows() {
+      const rows = await db.getAllAsync(
+        `SELECT c.front, c.type, c.back, s.name AS set_name
+         FROM cards c
+         LEFT JOIN set_cards sc ON sc.card_id = c.id
+         LEFT JOIN sets s ON s.id = sc.set_id
+         ORDER BY c.front COLLATE NOCASE ASC, c.type COLLATE NOCASE ASC, c.back COLLATE NOCASE ASC, s.name COLLATE NOCASE ASC`
+      );
+
+      return buildVocabularyExportRows(rows ?? []);
+    },
+
     async importLearningProgressRows(rows) {
       await db.withTransactionAsync(async () => {
         await db.runAsync('DELETE FROM quiz_answers');
@@ -507,6 +519,11 @@ export function createWebStorage() {
     async exportLearningProgressRows() {
       const store = readWebStore();
       return buildExportRows(buildExportRowsFromStore(store));
+    },
+
+    async exportVocabularyRows() {
+      const store = readWebStore();
+      return buildVocabularyExportRows(buildVocabularyExportRowsFromStore(store));
     },
 
     async importLearningProgressRows(rows) {
@@ -890,6 +907,15 @@ function buildExportRows(rows) {
   });
 }
 
+function buildVocabularyExportRows(rows) {
+  return rows.map((row) => ({
+    front: row.front,
+    type: row.type,
+    back: row.back,
+    set: row.set_name || row.set || 'Imported',
+  }));
+}
+
 function buildExportRowsFromStore(store) {
   const statsByCardId = getAnswerStatsByCardId(store.quizAnswers);
   const progressByCardId = new Map(store.cardProgress.map((item) => [item.card_id, item]));
@@ -924,6 +950,52 @@ function buildExportRowsFromStore(store) {
       };
     })
     .sort((left, right) => left.front.localeCompare(right.front));
+}
+
+function buildVocabularyExportRowsFromStore(store) {
+  const setNamesById = new Map(store.sets.map((set) => [set.id, set.name]));
+  const rows = [];
+
+  for (const card of [...store.cards].sort((left, right) => {
+    const frontComparison = String(left.front || '').localeCompare(String(right.front || ''));
+    if (frontComparison !== 0) {
+      return frontComparison;
+    }
+
+    const typeComparison = String(left.type || '').localeCompare(String(right.type || ''));
+    if (typeComparison !== 0) {
+      return typeComparison;
+    }
+
+    return String(left.back || '').localeCompare(String(right.back || ''));
+  })) {
+    const relatedSetNames = store.setCards
+      .filter((relation) => Number(relation.card_id) === Number(card.id))
+      .map((relation) => setNamesById.get(relation.set_id))
+      .filter(Boolean)
+      .sort((left, right) => left.localeCompare(right));
+
+    if (!relatedSetNames.length) {
+      rows.push({
+        front: card.front,
+        type: card.type,
+        back: card.back,
+        set_name: 'Imported',
+      });
+      continue;
+    }
+
+    for (const setName of relatedSetNames) {
+      rows.push({
+        front: card.front,
+        type: card.type,
+        back: card.back,
+        set_name: setName,
+      });
+    }
+  }
+
+  return rows;
 }
 
 function formatCardBack(type, back) {
