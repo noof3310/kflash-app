@@ -1,0 +1,97 @@
+front,type,back,set
+-잖아,ending,ก็รู้อยู่แล้วนี่ / ก็แบบว่า...,Ending
+-거든,ending,ก็เพราะว่า... / อธิบายเหตุผลแบบกันเอง,Ending
+-니까,ending,เพราะว่า / เพราะงั้น...,Ending
+-자,ending,กันเถอะ / ชวนทำ...,Ending
+-지?,ending,...ใช่ไหม / เห็นด้วยไหม,Ending
+-지!,ending,ก็ใช่ไง / แน่นอนอยู่แล้ว,Ending
+-나?,ending,...ไหม (ถามตัวเลือก),Ending
+-(으)ㄹ까?,ending,...ดีไหม / จะ...ดีไหม,Ending
+-(으)ㄹ까 봐,ending,กลัวว่า...เลย...,Ending
+-(으)ㄹ래,ending,จะ... (ตั้งใจเอง),Ending
+-(으)ㄹ래?,ending,...เอาไหม / จะ...ไหม,Ending
+-지 마,ending,อย่า...,Ending
+-아/어 봐,ending,ลอง...ดู,Ending
+-아/어 보다,ending,เคย... / ลอง...,Ending
+-아/어 줄게,ending,จะ...ให้ (ทำให้),Ending
+-아/어 줘,ending,ช่วย...ให้หน่อย,Ending
+-(아/어)야지,ending,ควรจะ...แล้ว / เดี๋ยวต้อง...,Ending
+-겠다,ending,น่าจะ... / คงจะ...,Ending
+-네?,ending,...นะ? / เอ๊ะ?,Ending
+-군/구나,ending,อ๋อ...นี่เอง / เพิ่งรู้,Ending
+-다니까,ending,ก็บอกว่า...ไง!,Ending
+-라니까,ending,ก็บอกว่า...แล้วไง!,Ending
+-냐?,ending,...เหรอ (กันเอง/ห้วน),Ending
+-대,ending,เขาว่า... / ได้ยินว่า...,Ending
+-래,ending,บอกว่าให้... / เขาบอกว่า...,Ending
+-는 중이야,ending,กำลัง...,Ending
+-고 싶어,ending,อยาก...,Ending
+-기 싫어,ending,ไม่อยาก...,Ending
+-(아/어)야 돼,ending,ต้อง...,Ending
+근데도,conj.,ถึงอย่างนั้นก็ยัง / แต่ก็ยัง...,Conjunction
+그러니까,conj.,เพราะงั้น / ดังนั้นแหละ,Conjunction
+그러면,conj.,ถ้างั้น / งั้นก็...,Conjunction
+그래서인지,conj.,เพราะงั้นมั้ง / เลยรู้สึกว่า...,Conjunction
+아니면,conj.,หรือไม่ก็ / หรือ...,Conjunction
+근데 말이야,conj.,คือว่า... / ว่าแต่...,Conjunction
+그냥,conj.,ก็แค่ / เฉยๆ / ก็...,Conjunction
+그래가지고,conj.,แล้วก็เลย... (กันเองมาก),Conjunction
+그래서 말인데,conj.,คือว่า... / จะบอกว่า...,Conjunction
+그럼,conj.,งั้น / ถ้างั้น...,Conjunction
+-같아,ending,เหมือนว่า... / ดูท่าว่า... / เดาจากความรู้สึก,Ending
+-고,ending,ใช้เชื่อมกริยาว่า และ / แล้วก็,Ending
+-는데,ending,ใช้เกริ่นบริบท / แต่ / แล้วก็,Ending
+-네요,ending,แสดงการเพิ่งรู้หรือแปลกใจ,Ending
+-동안,ending,ระหว่าง / ตลอดช่วงเวลา,Ending
+-때,ending,ตอนที่ / เวลาเมื่อ,Ending
+-려고,ending,ตั้งใจจะ... / เพื่อจะ...,Ending
+-려고 했어,ending,ตั้งใจว่าจะ... / เดิมทีจะ...,Ending
+-(으)면서,ending,ขณะเดียวกัน / พร้อมกับ,Ending
+-밖에,ending,มีแค่... / นอกจาก...ไม่,Ending
+-보다 더,ending,...กว่า / ใช้เปรียบเทียบ A กับ B,Ending
+-부터 -까지,ending,ตั้งแต่...ถึง...,Ending
+-아/어,ending,present tense,Ending
+-(아/어)도 돼,ending,ทำได้ / อนุญาตให้ทำ,Ending
+-(아/어)야 해,ending,ต้อง... / จำเป็นต้อง...,Ending
+-았/었,ending,past tense,Ending
+-(으)ㄹ 거야,ending,future tense,Ending
+-지만,ending,แต่ / ถึงแม้ว่า,Ending
+-처럼,ending,เหมือนกับ... / ราวกับ...,Ending
+그래도,conj.,ถึงอย่างนั้นก็ยัง / แม้แบบนั้นก็ยัง,Conjunction
+그래서,conj.,ดังนั้น / เพราะงั้น,Conjunction
+그리고,conj.,และ / แล้วก็,Conjunction
+근데,conj.,แต่ / ว่าแต่ (กันเอง),Conjunction
+하지만,conj.,แต่ / อย่างไรก็ตาม (ทางการ),Conjunction
+-할 수 있어,ending,ทำได้ / สามารถ...,Ending
+-할 수 없어,ending,ทำไม่ได้ / ไม่สามารถ...,Ending
+-(아/어)서,ending,เพราะว่า... / แล้วก็... (เชื่อมเหตุผล/ลำดับ),Ending
+-고,ending,และ / แล้วก็,Connector (High Prior)
+그래서,conj.,ดังนั้น / เลย,Connector (High Prior)
+근데,conj.,แต่ / เอาจริงนะ / ว่าแต่ (กันเอง),Connector (High Prior)
+그런데,conj.,แต่ (สุภาพ),Connector (High Prior)
+그래도,conj.,ถึงอย่างนั้นก็ (ขัดแย้งแบบ soft),Connector (High Prior)
+-는데,ending,ใช้เกริ่นบริบท / แต่ / แล้วก็,Connector (High Prior)
+-니까,ending,เพราะว่า / ดังนั้น,Connector (High Prior)
+-(아/어)서,ending,เพราะว่า / แล้วก็,Connector (High Prior)
+-지만,ending,แต่ (formal),Connector (High Prior)
+-거든,ending,ก็เพราะว่า... (กันเอง),Connector (High Prior)
+-잖아,ending,ก็รู้อยู่แล้วนี่ (กันเอง),Connector (High Prior)
+-지?,ending,...ใช่ไหม?,Connector (High Prior)
+-지,ending,...นะ / เห็นด้วย / soft confirm,Connector (High Prior)
+-자,ending,กันเถอะ / ชวนทำ,Connector (High Prior)
+-려고,ending,ตั้งใจจะ...,Connector (High Prior)
+-(으)ㄹ게,ending,จะทำ... (ทันที),Connector (High Prior)
+-(으)ㄹ 거야,ending,จะทำ... (ในอนาคต),Connector (High Prior)
+-(아/어)도 돼,ending,...ได้ไหม / ได้,Connector (High Prior)
+-(아/어)야 해,ending,ต้อง...,Connector (High Prior)
+-(으)면서,ending,ในขณะที่... (ทำพร้อมกัน),Connector (High Prior)
+-(으)면,ending,ถ้า...,Connector (High Prior)
+-(으)ㄹ 때,ending,ตอนที่... (บอกเวลา),Connector (High Prior)
+-처럼,ending,เหมือน...,Connector (High Prior)
+-보다,ending,กว่า...,Connector (High Prior)
+제일,adv.,ที่สุด,Connector (High Prior)
+좀,adv.,นิดหน่อย,Connector (High Prior)
+진짜,adv.,จริงๆ / มาก,Connector (High Prior)
+완전,adv.,สุดๆ (ตื่นเต้น),Connector (High Prior)
+약간,adv.,ประมาณ / kinda,Connector (High Prior)
+그냥,adv.,แค่ / เฉยๆ,Connector (High Prior)
