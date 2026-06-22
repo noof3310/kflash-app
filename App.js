@@ -2318,6 +2318,235 @@ function AppShell({ storage }) {
     );
   }
 
+  if (screen === 'card-editor') {
+    return (
+      <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.screenBackground }]}>
+        <StatusBar style={statusBarStyle} />
+        <AnimatedScrollView
+          style={animatedScreenStyle}
+          contentContainerStyle={styles.container}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.quizHeaderRow}>
+            <Pressable
+              style={[styles.secondaryButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+              onPress={() => setScreen('home')}
+            >
+              <Text style={[styles.secondaryButtonText, { color: colors.primaryText }]}>Back</Text>
+            </Pressable>
+          </View>
+
+          <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>Edit cards</Text>
+            <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
+              Choose one set to add, edit, or remove cards directly. Removing a card only affects this set unless the card is not used anywhere else. If a card is shared across sets, saving edits updates that shared card.
+            </Text>
+          </View>
+
+          {sets.length === 0 ? (
+            <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
+                No sets yet. Import a CSV first, then cards in that set can be edited here.
+              </Text>
+            </View>
+          ) : (
+            <>
+              <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <Text style={[styles.settingsLabel, { color: colors.primaryText }]}>Choose set</Text>
+                <View style={styles.filterRow}>
+                  {sets.map((item) => {
+                    const active = item.id === cardEditorSetId;
+                    return (
+                      <Pressable
+                        key={`editor-set-${item.id}`}
+                        style={[
+                          styles.filterChip,
+                          { backgroundColor: colors.softSurface, borderColor: colors.border },
+                          active && { backgroundColor: colors.primaryText, borderColor: colors.primaryText },
+                        ]}
+                        onPress={() => setCardEditorSetId(item.id)}
+                      >
+                        <Text style={[styles.filterChipText, { color: active ? colors.surface : colors.primaryText }]}>
+                          {item.name}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                {activeCardEditorSet ? (
+                  <View style={[styles.selectedSetSummaryCard, { backgroundColor: colors.softSurface, borderColor: colors.border }]}>
+                    <View style={styles.selectedSetSummaryHeader}>
+                      <Text style={[styles.settingsLabel, { color: colors.primaryText }]}>
+                        Editing {activeCardEditorSet.name}
+                      </Text>
+                      <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
+                        {formatSetStats(activeCardEditorSet)}
+                      </Text>
+                    </View>
+                  </View>
+                ) : null}
+              </View>
+
+              <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <View style={[styles.cardEditorPanel, { backgroundColor: colors.elevatedSurface, borderColor: colors.border }]}>
+                  <Text style={[styles.settingsLabel, { color: colors.primaryText }]}>Add card to this set</Text>
+                  <TextInput
+                    value={newCardDraft.front}
+                    onChangeText={(value) => updateNewCardField('front', value)}
+                    placeholder="Front"
+                    placeholderTextColor={colors.secondaryText}
+                    style={[
+                      styles.input,
+                      {
+                        borderColor: colors.border,
+                        backgroundColor: colors.inputBackground,
+                        color: colors.primaryText,
+                      },
+                    ]}
+                  />
+                  <TextInput
+                    value={newCardDraft.type}
+                    onChangeText={(value) => updateNewCardField('type', value)}
+                    placeholder="Type (optional)"
+                    placeholderTextColor={colors.secondaryText}
+                    style={[
+                      styles.input,
+                      {
+                        borderColor: colors.border,
+                        backgroundColor: colors.inputBackground,
+                        color: colors.primaryText,
+                      },
+                    ]}
+                  />
+                  <TextInput
+                    value={newCardDraft.back}
+                    onChangeText={(value) => updateNewCardField('back', value)}
+                    placeholder="Back"
+                    placeholderTextColor={colors.secondaryText}
+                    style={[
+                      styles.input,
+                      {
+                        borderColor: colors.border,
+                        backgroundColor: colors.inputBackground,
+                        color: colors.primaryText,
+                      },
+                    ]}
+                  />
+                  <Pressable
+                    style={[styles.primaryButton, { backgroundColor: colors.primaryButton }]}
+                    onPress={handleAddCardToSet}
+                    disabled={cardEditorActionKey === 'create-card' || !cardEditorSetId}
+                  >
+                    <Text style={[styles.primaryButtonText, { color: colors.primaryButtonText }]}>
+                      {cardEditorActionKey === 'create-card' ? 'Adding...' : 'Add card'}
+                    </Text>
+                  </Pressable>
+                </View>
+
+                {cardEditorLoading ? (
+                  <Text style={[styles.mutedText, { color: colors.secondaryText }]}>Loading cards for this set...</Text>
+                ) : cardEditorCards.length === 0 ? (
+                  <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
+                    This set has no cards yet. Add the first card above.
+                  </Text>
+                ) : (
+                  cardEditorCards.map((card) => {
+                    const draft = cardEditorDrafts[card.id] ?? createCardDraftFromCard(card);
+                    const saveDisabled =
+                      cardEditorActionKey === `save-${card.id}` || !hasCardDraftChanges(card, draft);
+
+                    return (
+                      <View
+                        key={`editor-card-${card.id}`}
+                        style={[styles.cardEditorPanel, { backgroundColor: colors.elevatedSurface, borderColor: colors.border }]}
+                      >
+                        <View style={styles.cardEditorHeader}>
+                          <Text style={[styles.settingsLabel, { color: colors.primaryText }]}>
+                            {draft.front.trim() || card.front}
+                          </Text>
+                          <Text style={[styles.cardEditorMeta, { color: colors.secondaryText }]}>
+                            {Number(card.set_count) > 1 ? `Shared with ${card.set_count - 1} other set(s)` : 'Only in this set'}
+                          </Text>
+                        </View>
+                        <TextInput
+                          value={draft.front}
+                          onChangeText={(value) => updateCardEditorDraft(card.id, 'front', value)}
+                          placeholder="Front"
+                          placeholderTextColor={colors.secondaryText}
+                          style={[
+                            styles.input,
+                            {
+                              borderColor: colors.border,
+                              backgroundColor: colors.inputBackground,
+                              color: colors.primaryText,
+                            },
+                          ]}
+                        />
+                        <TextInput
+                          value={draft.type}
+                          onChangeText={(value) => updateCardEditorDraft(card.id, 'type', value)}
+                          placeholder="Type (optional)"
+                          placeholderTextColor={colors.secondaryText}
+                          style={[
+                            styles.input,
+                            {
+                              borderColor: colors.border,
+                              backgroundColor: colors.inputBackground,
+                              color: colors.primaryText,
+                            },
+                          ]}
+                        />
+                        <TextInput
+                          value={draft.back}
+                          onChangeText={(value) => updateCardEditorDraft(card.id, 'back', value)}
+                          placeholder="Back"
+                          placeholderTextColor={colors.secondaryText}
+                          style={[
+                            styles.input,
+                            {
+                              borderColor: colors.border,
+                              backgroundColor: colors.inputBackground,
+                              color: colors.primaryText,
+                            },
+                          ]}
+                        />
+                        <View style={styles.actionsRow}>
+                          <Pressable
+                            style={[styles.secondaryButton, styles.cardEditorActionButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                            onPress={() => handleSaveCardEdit(card)}
+                            disabled={saveDisabled}
+                          >
+                            <Text style={[styles.secondaryButtonText, { color: saveDisabled ? colors.secondaryText : colors.primaryText }]}>
+                              {cardEditorActionKey === `save-${card.id}` ? 'Saving...' : 'Save'}
+                            </Text>
+                          </Pressable>
+                          <Pressable
+                            style={[
+                              styles.secondaryButton,
+                              styles.cardEditorActionButton,
+                              { backgroundColor: colors.dangerSurface, borderColor: colors.dangerBorder },
+                            ]}
+                            onPress={() => handleRemoveCardFromSet(card)}
+                            disabled={cardEditorActionKey === `delete-${card.id}`}
+                          >
+                            <Text style={[styles.secondaryButtonText, { color: colors.dangerText }]}>
+                              {cardEditorActionKey === `delete-${card.id}` ? 'Removing...' : 'Remove'}
+                            </Text>
+                          </Pressable>
+                        </View>
+                      </View>
+                    );
+                  })
+                )}
+              </View>
+            </>
+          )}
+        </AnimatedScrollView>
+      </SafeAreaView>
+    );
+  }
+
   if (screen === 'duplicates') {
     return (
       <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.screenBackground }]}>
@@ -2707,200 +2936,14 @@ function AppShell({ storage }) {
       <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>Edit cards</Text>
         <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
-          Choose one set to add, edit, or remove cards directly. Removing a card only affects this set unless the card is not used anywhere else. If a card is shared across sets, saving edits updates that shared card.
+          Open a separate editor screen to add, remove, or update cards by set.
         </Text>
-        {sets.length === 0 ? (
-          <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
-            No sets yet. Import a CSV first, then cards in that set can be edited here.
-          </Text>
-        ) : (
-          <>
-            <View style={styles.filterRow}>
-              {sets.map((item) => {
-                const active = item.id === cardEditorSetId;
-                return (
-                  <Pressable
-                    key={`editor-set-${item.id}`}
-                    style={[
-                      styles.filterChip,
-                      { backgroundColor: colors.softSurface, borderColor: colors.border },
-                      active && { backgroundColor: colors.primaryText, borderColor: colors.primaryText },
-                    ]}
-                    onPress={() => setCardEditorSetId(item.id)}
-                  >
-                    <Text style={[styles.filterChipText, { color: active ? colors.surface : colors.primaryText }]}>
-                      {item.name}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            {activeCardEditorSet ? (
-              <View style={[styles.selectedSetSummaryCard, { backgroundColor: colors.softSurface, borderColor: colors.border }]}>
-                <View style={styles.selectedSetSummaryHeader}>
-                  <Text style={[styles.settingsLabel, { color: colors.primaryText }]}>
-                    Editing {activeCardEditorSet.name}
-                  </Text>
-                  <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
-                    {formatSetStats(activeCardEditorSet)}
-                  </Text>
-                </View>
-              </View>
-            ) : null}
-
-            <View style={[styles.cardEditorPanel, { backgroundColor: colors.elevatedSurface, borderColor: colors.border }]}>
-              <Text style={[styles.settingsLabel, { color: colors.primaryText }]}>Add card to this set</Text>
-              <TextInput
-                value={newCardDraft.front}
-                onChangeText={(value) => updateNewCardField('front', value)}
-                placeholder="Front"
-                placeholderTextColor={colors.secondaryText}
-                style={[
-                  styles.input,
-                  {
-                    borderColor: colors.border,
-                    backgroundColor: colors.inputBackground,
-                    color: colors.primaryText,
-                  },
-                ]}
-              />
-              <TextInput
-                value={newCardDraft.type}
-                onChangeText={(value) => updateNewCardField('type', value)}
-                placeholder="Type (optional)"
-                placeholderTextColor={colors.secondaryText}
-                style={[
-                  styles.input,
-                  {
-                    borderColor: colors.border,
-                    backgroundColor: colors.inputBackground,
-                    color: colors.primaryText,
-                  },
-                ]}
-              />
-              <TextInput
-                value={newCardDraft.back}
-                onChangeText={(value) => updateNewCardField('back', value)}
-                placeholder="Back"
-                placeholderTextColor={colors.secondaryText}
-                style={[
-                  styles.input,
-                  {
-                    borderColor: colors.border,
-                    backgroundColor: colors.inputBackground,
-                    color: colors.primaryText,
-                  },
-                ]}
-              />
-              <Pressable
-                style={[styles.primaryButton, { backgroundColor: colors.primaryButton }]}
-                onPress={handleAddCardToSet}
-                disabled={cardEditorActionKey === 'create-card' || !cardEditorSetId}
-              >
-                <Text style={[styles.primaryButtonText, { color: colors.primaryButtonText }]}>
-                  {cardEditorActionKey === 'create-card' ? 'Adding...' : 'Add card'}
-                </Text>
-              </Pressable>
-            </View>
-
-            {cardEditorLoading ? (
-              <Text style={[styles.mutedText, { color: colors.secondaryText }]}>Loading cards for this set...</Text>
-            ) : cardEditorCards.length === 0 ? (
-              <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
-                This set has no cards yet. Add the first card above.
-              </Text>
-            ) : (
-              cardEditorCards.map((card) => {
-                const draft = cardEditorDrafts[card.id] ?? createCardDraftFromCard(card);
-                const saveDisabled =
-                  cardEditorActionKey === `save-${card.id}` || !hasCardDraftChanges(card, draft);
-
-                return (
-                  <View
-                    key={`editor-card-${card.id}`}
-                    style={[styles.cardEditorPanel, { backgroundColor: colors.elevatedSurface, borderColor: colors.border }]}
-                  >
-                    <View style={styles.cardEditorHeader}>
-                      <Text style={[styles.settingsLabel, { color: colors.primaryText }]}>
-                        {draft.front.trim() || card.front}
-                      </Text>
-                      <Text style={[styles.cardEditorMeta, { color: colors.secondaryText }]}>
-                        {Number(card.set_count) > 1 ? `Shared with ${card.set_count - 1} other set(s)` : 'Only in this set'}
-                      </Text>
-                    </View>
-                    <TextInput
-                      value={draft.front}
-                      onChangeText={(value) => updateCardEditorDraft(card.id, 'front', value)}
-                      placeholder="Front"
-                      placeholderTextColor={colors.secondaryText}
-                      style={[
-                        styles.input,
-                        {
-                          borderColor: colors.border,
-                          backgroundColor: colors.inputBackground,
-                          color: colors.primaryText,
-                        },
-                      ]}
-                    />
-                    <TextInput
-                      value={draft.type}
-                      onChangeText={(value) => updateCardEditorDraft(card.id, 'type', value)}
-                      placeholder="Type (optional)"
-                      placeholderTextColor={colors.secondaryText}
-                      style={[
-                        styles.input,
-                        {
-                          borderColor: colors.border,
-                          backgroundColor: colors.inputBackground,
-                          color: colors.primaryText,
-                        },
-                      ]}
-                    />
-                    <TextInput
-                      value={draft.back}
-                      onChangeText={(value) => updateCardEditorDraft(card.id, 'back', value)}
-                      placeholder="Back"
-                      placeholderTextColor={colors.secondaryText}
-                      style={[
-                        styles.input,
-                        {
-                          borderColor: colors.border,
-                          backgroundColor: colors.inputBackground,
-                          color: colors.primaryText,
-                        },
-                      ]}
-                    />
-                    <View style={styles.actionsRow}>
-                      <Pressable
-                        style={[styles.secondaryButton, styles.cardEditorActionButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
-                        onPress={() => handleSaveCardEdit(card)}
-                        disabled={saveDisabled}
-                      >
-                        <Text style={[styles.secondaryButtonText, { color: saveDisabled ? colors.secondaryText : colors.primaryText }]}>
-                          {cardEditorActionKey === `save-${card.id}` ? 'Saving...' : 'Save'}
-                        </Text>
-                      </Pressable>
-                      <Pressable
-                        style={[
-                          styles.secondaryButton,
-                          styles.cardEditorActionButton,
-                          { backgroundColor: colors.dangerSurface, borderColor: colors.dangerBorder },
-                        ]}
-                        onPress={() => handleRemoveCardFromSet(card)}
-                        disabled={cardEditorActionKey === `delete-${card.id}`}
-                      >
-                        <Text style={[styles.secondaryButtonText, { color: colors.dangerText }]}>
-                          {cardEditorActionKey === `delete-${card.id}` ? 'Removing...' : 'Remove'}
-                        </Text>
-                      </Pressable>
-                    </View>
-                  </View>
-                );
-              })
-            )}
-          </>
-        )}
+        <Pressable
+          style={[styles.secondaryButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+          onPress={() => setScreen('card-editor')}
+        >
+          <Text style={[styles.secondaryButtonText, { color: colors.primaryText }]}>Open card editor</Text>
+        </Pressable>
       </View>
 
       <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
