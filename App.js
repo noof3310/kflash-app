@@ -249,6 +249,12 @@ function AppShell({ storage }) {
   const [setFilter, setSetFilter] = useState('all');
   const [setSort, setSetSort] = useState('priority');
   const [showAllSets, setShowAllSets] = useState(false);
+  const [cardEditorSetId, setCardEditorSetId] = useState(null);
+  const [cardEditorCards, setCardEditorCards] = useState([]);
+  const [cardEditorDrafts, setCardEditorDrafts] = useState({});
+  const [newCardDraft, setNewCardDraft] = useState(createEmptyCardDraft());
+  const [cardEditorLoading, setCardEditorLoading] = useState(false);
+  const [cardEditorActionKey, setCardEditorActionKey] = useState('');
   const [duplicateFrontDrafts, setDuplicateFrontDrafts] = useState({});
   const [duplicateMergeTargets, setDuplicateMergeTargets] = useState({});
   const [duplicateActionKey, setDuplicateActionKey] = useState('');
@@ -277,6 +283,7 @@ function AppShell({ storage }) {
   const feedbackTimeoutRef = useRef(null);
   const feedbackSoundRequestRef = useRef(0);
   const nextPromptAutoplayDelayRef = useRef(0);
+  const cardEditorRequestRef = useRef(0);
   const debugUnlockTapCountRef = useRef(0);
   const debugUnlockTimerRef = useRef(null);
   const reviewScrollRef = useRef(null);
@@ -475,6 +482,10 @@ function AppShell({ storage }) {
       ),
     [selectedSets]
   );
+  const activeCardEditorSet = useMemo(
+    () => sets.find((item) => item.id === cardEditorSetId) ?? null,
+    [cardEditorSetId, sets]
+  );
   const debugCountryOptions = useMemo(() => {
     const countryCodes = Array.from(
       new Set(
@@ -658,6 +669,17 @@ function AppShell({ storage }) {
 
     return undefined;
   }, [debugCountryFilter, debugCountryOptions]);
+
+  useEffect(() => {
+    setCardEditorSetId((currentSetId) => {
+      if (currentSetId && sets.some((item) => item.id === currentSetId)) {
+        return currentSetId;
+      }
+
+      const preferredSetId = selectedSetIds.find((setId) => sets.some((item) => item.id === setId));
+      return preferredSetId ?? sets[0]?.id ?? null;
+    });
+  }, [selectedSetIds, sets]);
 
   useEffect(() => {
     setDuplicateMergeTargets((prev) => {
@@ -932,9 +954,55 @@ function AppShell({ storage }) {
     return storage.loadSelectedCards(selectedSetIds);
   }, [selectedSetIds, storage]);
 
+  const loadCardsForEditorSet = useCallback(
+    async (setId) => {
+      const normalizedSetId = Number(setId);
+      if (!normalizedSetId) {
+        setCardEditorCards([]);
+        setCardEditorDrafts({});
+        return [];
+      }
+
+      const requestId = cardEditorRequestRef.current + 1;
+      cardEditorRequestRef.current = requestId;
+      setCardEditorLoading(true);
+
+      try {
+        const rows = await storage.loadCardsForSet(normalizedSetId);
+        if (cardEditorRequestRef.current !== requestId) {
+          return rows ?? [];
+        }
+
+        setCardEditorCards(rows ?? []);
+        setCardEditorDrafts(buildCardEditorDrafts(rows ?? []));
+        return rows ?? [];
+      } finally {
+        if (cardEditorRequestRef.current === requestId) {
+          setCardEditorLoading(false);
+        }
+      }
+    },
+    [storage]
+  );
+
   const loadDistractorBiasMap = useCallback(async () => {
     return storage.loadDistractorBiasMap(selectedSetIds);
   }, [selectedSetIds, storage]);
+
+  const refreshCardEditor = useCallback(
+    async (setId = cardEditorSetId) => {
+      await Promise.all([refreshAll(), loadCardsForEditorSet(setId)]);
+    },
+    [cardEditorSetId, loadCardsForEditorSet, refreshAll]
+  );
+
+  useEffect(() => {
+    loadCardsForEditorSet(cardEditorSetId).catch(() => {
+      setCardEditorCards([]);
+      setCardEditorDrafts({});
+      setCardEditorLoading(false);
+    });
+  }, [cardEditorSetId, loadCardsForEditorSet]);
 
   const openReviewScreen = useCallback(async () => {
     if (selectedSetIds.length === 0) {
@@ -980,7 +1048,7 @@ function AppShell({ storage }) {
 
       await storage.importCsvRows(rows);
 
-      await refreshAll();
+      await refreshCardEditor();
       showAlert('Import complete', `Loaded ${rows.length} cards from CSV.`);
     } catch (error) {
       showAlert('Import failed', error?.message ?? 'Something went sideways while importing.');
@@ -993,7 +1061,7 @@ function AppShell({ storage }) {
     try {
       const rows = parseImportCsvRows(EXAMPLE_CSV_TEXT);
       await storage.importCsvRows(rows);
-      await refreshAll();
+      await refreshCardEditor();
       showAlert('Example set ready', `Loaded ${rows.length} cards into the Example set.`);
     } catch (error) {
       showAlert('Could not load example set', error?.message ?? 'Something went wrong while loading the example set.');
@@ -1106,7 +1174,7 @@ function AppShell({ storage }) {
         onConfirm: async () => {
           try {
             await storage.importLearningProgressRows(rows);
-            await refreshAll();
+            await refreshCardEditor();
             setQuizFeedback(null);
             setReviewCards([]);
             setDistractorBiasMap({});
@@ -1132,6 +1200,103 @@ function AppShell({ storage }) {
     );
   };
 
+  const updateCardEditorDraft = useCallback((cardId, field, value) => {
+    setCardEditorDrafts((prev) => ({
+      ...prev,
+      [cardId]: {
+        ...(prev[cardId] ?? createEmptyCardDraft()),
+        [field]: value,
+      },
+    }));
+  }, []);
+
+  const updateNewCardField = useCallback((field, value) => {
+    setNewCardDraft((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  }, []);
+
+  const handleAddCardToSet = useCallback(async () => {
+    if (!cardEditorSetId) {
+      showAlert('Choose a set', 'Pick a set before adding a card.');
+      return;
+    }
+
+    setCardEditorActionKey('create-card');
+    try {
+      await storage.createCardInSet({
+        setId: cardEditorSetId,
+        ...newCardDraft,
+      });
+      setNewCardDraft(createEmptyCardDraft());
+      await refreshCardEditor(cardEditorSetId);
+      showAlert('Card added', 'The card is ready in this set.');
+    } catch (error) {
+      showAlert('Could not add card', error?.message ?? 'Something went wrong while creating the card.');
+    } finally {
+      setCardEditorActionKey('');
+    }
+  }, [cardEditorSetId, newCardDraft, refreshCardEditor, storage]);
+
+  const handleSaveCardEdit = useCallback(
+    async (card) => {
+      const nextDraft = normalizeCardDraft(cardEditorDrafts[card.id] ?? createCardDraftFromCard(card));
+      if (!hasCardDraftChanges(card, nextDraft)) {
+        return;
+      }
+
+      setCardEditorActionKey(`save-${card.id}`);
+      try {
+        await storage.updateCard(card.id, nextDraft);
+        await refreshCardEditor(cardEditorSetId);
+        showAlert('Card updated', 'Saved changes to this card.');
+      } catch (error) {
+        showAlert('Could not update card', error?.message ?? 'Something went wrong while saving the card.');
+      } finally {
+        setCardEditorActionKey('');
+      }
+    },
+    [cardEditorDrafts, cardEditorSetId, refreshCardEditor, storage]
+  );
+
+  const handleRemoveCardFromSet = useCallback(
+    (card) => {
+      const removalMessage =
+        Number(card.set_count) > 1
+          ? 'This will remove the card from the current set only. The same card will stay in other sets.'
+          : 'This will delete the card from this set and remove its review history from the device.';
+
+      showConfirm({
+        title: 'Remove card?',
+        message: removalMessage,
+        confirmText: Number(card.set_count) > 1 ? 'Remove from set' : 'Delete card',
+        destructive: true,
+        onConfirm: async () => {
+          setCardEditorActionKey(`delete-${card.id}`);
+          try {
+            const result = await storage.removeCardFromSet({
+              setId: cardEditorSetId,
+              cardId: card.id,
+            });
+            await refreshCardEditor(cardEditorSetId);
+            showAlert(
+              result?.removedCard ? 'Card deleted' : 'Card removed',
+              result?.removedCard
+                ? 'The card was deleted because it was no longer used in any set.'
+                : 'The card was removed from this set.'
+            );
+          } catch (error) {
+            showAlert('Could not remove card', error?.message ?? 'Something went wrong while removing the card.');
+          } finally {
+            setCardEditorActionKey('');
+          }
+        },
+      });
+    },
+    [cardEditorSetId, refreshCardEditor, storage]
+  );
+
   const updateDuplicateFrontDraft = useCallback((cardId, value) => {
     setDuplicateFrontDrafts((prev) => ({
       ...prev,
@@ -1154,7 +1319,7 @@ function AppShell({ storage }) {
           delete next[card.id];
           return next;
         });
-        await refreshAll();
+        await refreshCardEditor();
         showAlert('Front updated', `Updated "${card.front}" to "${nextFront}".`);
       } catch (error) {
         showAlert('Could not update front', error?.message ?? 'Something went wrong while renaming the card front.');
@@ -1162,7 +1327,7 @@ function AppShell({ storage }) {
         setDuplicateActionKey('');
       }
     },
-    [duplicateFrontDrafts, refreshAll, storage]
+    [duplicateFrontDrafts, refreshCardEditor, storage]
   );
 
   const handleMergeDuplicateGroup = useCallback(
@@ -1196,7 +1361,7 @@ function AppShell({ storage }) {
               delete next[group.key];
               return next;
             });
-            await refreshAll();
+            await refreshCardEditor();
             showAlert('Cards merged', `Merged ${sourceCards.length} duplicate card(s) into "${targetCard.back}".`);
           } catch (error) {
             showAlert('Could not merge cards', error?.message ?? 'Something went wrong while merging duplicate cards.');
@@ -1206,7 +1371,7 @@ function AppShell({ storage }) {
         },
       });
     },
-    [duplicateMergeTargets, refreshAll, storage]
+    [duplicateMergeTargets, refreshCardEditor, storage]
   );
 
   const speakText = useCallback(
@@ -1371,14 +1536,14 @@ function AppShell({ storage }) {
           setAnswers([]);
           setQuizFeedback(null);
           setScreen('home');
-          await refreshAll();
+          await refreshCardEditor();
           showAlert('Data cleared', 'All flash card data has been removed.');
         } catch (error) {
           showAlert('Could not clear data', 'Something went wrong while deleting your data.');
         }
       },
     });
-  }, [refreshAll, storage]);
+  }, [refreshCardEditor, storage]);
 
   const resetDatabaseSchema = useCallback(() => {
     showConfirm({
@@ -1408,14 +1573,14 @@ function AppShell({ storage }) {
           setTtsVoice(DEFAULT_TTS_VOICE);
           setTtsProvider(DEFAULT_TTS_PROVIDER);
           setScreen('home');
-          await refreshAll();
+          await refreshCardEditor();
           showAlert('Schema reset', 'The local database has been rebuilt.');
         } catch (error) {
           showAlert('Could not reset schema', 'Something went wrong while rebuilding the database.');
         }
       },
     });
-  }, [refreshAll, storage]);
+  }, [refreshCardEditor, storage]);
 
   const updateTheme = useCallback(
     async (nextTheme) => {
@@ -1435,7 +1600,7 @@ function AppShell({ storage }) {
       clearTimeout(feedbackTimeoutRef.current);
     }
     await stopTtsPlayback();
-    await refreshAll();
+    await refreshCardEditor();
     setSetSearchQuery('');
     setShowAllSets(false);
     setQuizFeedback(null);
@@ -1451,7 +1616,7 @@ function AppShell({ storage }) {
     }
 
     if (selectedSetIds.length === 0) {
-      await refreshAll();
+      await refreshCardEditor();
       setQuizFeedback(null);
       setDistractorBiasMap({});
       setReviewCards([]);
@@ -1468,7 +1633,7 @@ function AppShell({ storage }) {
     setReviewCards(rows ?? []);
     setReviewScreenKey((prev) => prev + 1);
     setScreen('review');
-  }, [loadDistractorBiasMap, loadSelectedCards, refreshAll, selectedSetIds.length]);
+  }, [loadDistractorBiasMap, loadSelectedCards, refreshCardEditor, selectedSetIds.length]);
 
   const handleDebugUnlockTap = useCallback(() => {
     debugUnlockTapCountRef.current += 1;
@@ -2540,6 +2705,205 @@ function AppShell({ storage }) {
       </View>
 
       <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>Edit cards</Text>
+        <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
+          Choose one set to add, edit, or remove cards directly. Removing a card only affects this set unless the card is not used anywhere else. If a card is shared across sets, saving edits updates that shared card.
+        </Text>
+        {sets.length === 0 ? (
+          <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
+            No sets yet. Import a CSV first, then cards in that set can be edited here.
+          </Text>
+        ) : (
+          <>
+            <View style={styles.filterRow}>
+              {sets.map((item) => {
+                const active = item.id === cardEditorSetId;
+                return (
+                  <Pressable
+                    key={`editor-set-${item.id}`}
+                    style={[
+                      styles.filterChip,
+                      { backgroundColor: colors.softSurface, borderColor: colors.border },
+                      active && { backgroundColor: colors.primaryText, borderColor: colors.primaryText },
+                    ]}
+                    onPress={() => setCardEditorSetId(item.id)}
+                  >
+                    <Text style={[styles.filterChipText, { color: active ? colors.surface : colors.primaryText }]}>
+                      {item.name}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            {activeCardEditorSet ? (
+              <View style={[styles.selectedSetSummaryCard, { backgroundColor: colors.softSurface, borderColor: colors.border }]}>
+                <View style={styles.selectedSetSummaryHeader}>
+                  <Text style={[styles.settingsLabel, { color: colors.primaryText }]}>
+                    Editing {activeCardEditorSet.name}
+                  </Text>
+                  <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
+                    {formatSetStats(activeCardEditorSet)}
+                  </Text>
+                </View>
+              </View>
+            ) : null}
+
+            <View style={[styles.cardEditorPanel, { backgroundColor: colors.elevatedSurface, borderColor: colors.border }]}>
+              <Text style={[styles.settingsLabel, { color: colors.primaryText }]}>Add card to this set</Text>
+              <TextInput
+                value={newCardDraft.front}
+                onChangeText={(value) => updateNewCardField('front', value)}
+                placeholder="Front"
+                placeholderTextColor={colors.secondaryText}
+                style={[
+                  styles.input,
+                  {
+                    borderColor: colors.border,
+                    backgroundColor: colors.inputBackground,
+                    color: colors.primaryText,
+                  },
+                ]}
+              />
+              <TextInput
+                value={newCardDraft.type}
+                onChangeText={(value) => updateNewCardField('type', value)}
+                placeholder="Type (optional)"
+                placeholderTextColor={colors.secondaryText}
+                style={[
+                  styles.input,
+                  {
+                    borderColor: colors.border,
+                    backgroundColor: colors.inputBackground,
+                    color: colors.primaryText,
+                  },
+                ]}
+              />
+              <TextInput
+                value={newCardDraft.back}
+                onChangeText={(value) => updateNewCardField('back', value)}
+                placeholder="Back"
+                placeholderTextColor={colors.secondaryText}
+                style={[
+                  styles.input,
+                  {
+                    borderColor: colors.border,
+                    backgroundColor: colors.inputBackground,
+                    color: colors.primaryText,
+                  },
+                ]}
+              />
+              <Pressable
+                style={[styles.primaryButton, { backgroundColor: colors.primaryButton }]}
+                onPress={handleAddCardToSet}
+                disabled={cardEditorActionKey === 'create-card' || !cardEditorSetId}
+              >
+                <Text style={[styles.primaryButtonText, { color: colors.primaryButtonText }]}>
+                  {cardEditorActionKey === 'create-card' ? 'Adding...' : 'Add card'}
+                </Text>
+              </Pressable>
+            </View>
+
+            {cardEditorLoading ? (
+              <Text style={[styles.mutedText, { color: colors.secondaryText }]}>Loading cards for this set...</Text>
+            ) : cardEditorCards.length === 0 ? (
+              <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
+                This set has no cards yet. Add the first card above.
+              </Text>
+            ) : (
+              cardEditorCards.map((card) => {
+                const draft = cardEditorDrafts[card.id] ?? createCardDraftFromCard(card);
+                const saveDisabled =
+                  cardEditorActionKey === `save-${card.id}` || !hasCardDraftChanges(card, draft);
+
+                return (
+                  <View
+                    key={`editor-card-${card.id}`}
+                    style={[styles.cardEditorPanel, { backgroundColor: colors.elevatedSurface, borderColor: colors.border }]}
+                  >
+                    <View style={styles.cardEditorHeader}>
+                      <Text style={[styles.settingsLabel, { color: colors.primaryText }]}>
+                        {draft.front.trim() || card.front}
+                      </Text>
+                      <Text style={[styles.cardEditorMeta, { color: colors.secondaryText }]}>
+                        {Number(card.set_count) > 1 ? `Shared with ${card.set_count - 1} other set(s)` : 'Only in this set'}
+                      </Text>
+                    </View>
+                    <TextInput
+                      value={draft.front}
+                      onChangeText={(value) => updateCardEditorDraft(card.id, 'front', value)}
+                      placeholder="Front"
+                      placeholderTextColor={colors.secondaryText}
+                      style={[
+                        styles.input,
+                        {
+                          borderColor: colors.border,
+                          backgroundColor: colors.inputBackground,
+                          color: colors.primaryText,
+                        },
+                      ]}
+                    />
+                    <TextInput
+                      value={draft.type}
+                      onChangeText={(value) => updateCardEditorDraft(card.id, 'type', value)}
+                      placeholder="Type (optional)"
+                      placeholderTextColor={colors.secondaryText}
+                      style={[
+                        styles.input,
+                        {
+                          borderColor: colors.border,
+                          backgroundColor: colors.inputBackground,
+                          color: colors.primaryText,
+                        },
+                      ]}
+                    />
+                    <TextInput
+                      value={draft.back}
+                      onChangeText={(value) => updateCardEditorDraft(card.id, 'back', value)}
+                      placeholder="Back"
+                      placeholderTextColor={colors.secondaryText}
+                      style={[
+                        styles.input,
+                        {
+                          borderColor: colors.border,
+                          backgroundColor: colors.inputBackground,
+                          color: colors.primaryText,
+                        },
+                      ]}
+                    />
+                    <View style={styles.actionsRow}>
+                      <Pressable
+                        style={[styles.secondaryButton, styles.cardEditorActionButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                        onPress={() => handleSaveCardEdit(card)}
+                        disabled={saveDisabled}
+                      >
+                        <Text style={[styles.secondaryButtonText, { color: saveDisabled ? colors.secondaryText : colors.primaryText }]}>
+                          {cardEditorActionKey === `save-${card.id}` ? 'Saving...' : 'Save'}
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        style={[
+                          styles.secondaryButton,
+                          styles.cardEditorActionButton,
+                          { backgroundColor: colors.dangerSurface, borderColor: colors.dangerBorder },
+                        ]}
+                        onPress={() => handleRemoveCardFromSet(card)}
+                        disabled={cardEditorActionKey === `delete-${card.id}`}
+                      >
+                        <Text style={[styles.secondaryButtonText, { color: colors.dangerText }]}>
+                          {cardEditorActionKey === `delete-${card.id}` ? 'Removing...' : 'Remove'}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                );
+              })
+            )}
+          </>
+        )}
+      </View>
+
+      <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>Speech settings</Text>
         <Text style={[styles.mutedText, { color: colors.secondaryText }]}>Adjust speech playback to match the way you want cards to sound.</Text>
 
@@ -2860,6 +3224,45 @@ function getSetReviewTone(set, colors) {
   }
 
   return getAccuracyTone(Number(set.average_score_percent), colors);
+}
+
+function createEmptyCardDraft() {
+  return {
+    front: '',
+    type: '',
+    back: '',
+  };
+}
+
+function createCardDraftFromCard(card) {
+  return {
+    front: String(card?.front ?? ''),
+    type: String(card?.type ?? ''),
+    back: String(card?.back_text ?? ''),
+  };
+}
+
+function normalizeCardDraft(draft = {}) {
+  return {
+    front: String(draft.front ?? '').trim(),
+    type: String(draft.type ?? '').trim(),
+    back: String(draft.back ?? '').trim(),
+  };
+}
+
+function buildCardEditorDrafts(cards) {
+  return Object.fromEntries((cards ?? []).map((card) => [card.id, createCardDraftFromCard(card)]));
+}
+
+function hasCardDraftChanges(card, draft) {
+  const normalizedDraft = normalizeCardDraft(draft);
+  const normalizedCard = normalizeCardDraft(createCardDraftFromCard(card));
+
+  return (
+    normalizedDraft.front !== normalizedCard.front ||
+    normalizedDraft.type !== normalizedCard.type ||
+    normalizedDraft.back !== normalizedCard.back
+  );
 }
 
 function buildDuplicateFrontGroups(cards) {
@@ -3526,6 +3929,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 10,
+  },
+  cardEditorPanel: {
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 12,
+    gap: 10,
+  },
+  cardEditorHeader: {
+    gap: 4,
+  },
+  cardEditorMeta: {
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  cardEditorActionButton: {
+    flex: 1,
   },
   reviewStatText: {
     fontSize: 12,

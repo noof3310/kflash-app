@@ -103,6 +103,45 @@ export function createNativeStorage(db) {
       );
     },
 
+    async loadCardsForSet(setId) {
+      const normalizedSetId = Number(setId);
+      if (!normalizedSetId) {
+        return [];
+      }
+
+      return db.getAllAsync(
+        `SELECT c.id, c.front, c.type, c.back AS back_text,
+                CASE
+                  WHEN TRIM(COALESCE(c.type, '')) != '' THEN '(' || TRIM(c.type) || ') ' || c.back
+                  ELSE c.back
+                END AS back,
+                COALESCE(sc_stats.set_count, 0) AS set_count,
+                COALESCE(qa_stats.attempt_count, 0) AS attempt_count,
+                COALESCE(qa_stats.correct_count, 0) AS correct_count,
+                cp.last_reviewed_at,
+                cp.next_due_at,
+                COALESCE(cp.correct_streak, 0) AS correct_streak,
+                COALESCE(cp.interval_days, 0) AS interval_days
+         FROM cards c
+         INNER JOIN set_cards sc_current ON sc_current.card_id = c.id AND sc_current.set_id = ?
+         LEFT JOIN (
+           SELECT card_id, COUNT(DISTINCT set_id) AS set_count
+           FROM set_cards
+           GROUP BY card_id
+         ) sc_stats ON sc_stats.card_id = c.id
+         LEFT JOIN (
+           SELECT card_id,
+                  COUNT(*) AS attempt_count,
+                  COALESCE(SUM(is_correct), 0) AS correct_count
+           FROM quiz_answers
+           GROUP BY card_id
+         ) qa_stats ON qa_stats.card_id = c.id
+         LEFT JOIN card_progress cp ON cp.card_id = c.id
+         ORDER BY c.front COLLATE NOCASE ASC, c.type COLLATE NOCASE ASC, c.back COLLATE NOCASE ASC`,
+        [normalizedSetId]
+      );
+    },
+
     async loadDistractorBiasMap(selectedSetIds) {
       if (!selectedSetIds.length) {
         return {};
@@ -139,6 +178,123 @@ export function createNativeStorage(db) {
 
     createSet(name) {
       return db.runAsync('INSERT INTO sets (name) VALUES (?)', [name]);
+    },
+
+    async createCardInSet({ setId, front, type, back }) {
+      const normalizedSetId = Number(setId);
+      const normalizedCard = normalizeCardInput({ front, type, back });
+      assertValidCardInput(normalizedCard);
+
+      if (!normalizedSetId) {
+        throw new Error('Choose a set first.');
+      }
+
+      return db.withTransactionAsync(async () => {
+        const existingSet = await db.getFirstAsync('SELECT id FROM sets WHERE id = ? LIMIT 1', [normalizedSetId]);
+        if (!existingSet) {
+          throw new Error('Set not found.');
+        }
+
+        const existingCard = await db.getFirstAsync(
+          'SELECT id FROM cards WHERE front = ? AND type = ? AND back = ? LIMIT 1',
+          [normalizedCard.front, normalizedCard.type, normalizedCard.back]
+        );
+
+        const nextCardId = existingCard?.id
+          ? Number(existingCard.id)
+          : Number(
+              (
+                await db.runAsync(
+                  'INSERT INTO cards (front, type, back) VALUES (?, ?, ?)',
+                  [normalizedCard.front, normalizedCard.type, normalizedCard.back]
+                )
+              ).lastInsertRowId
+            );
+
+        const existingRelation = await db.getFirstAsync(
+          'SELECT 1 AS present FROM set_cards WHERE set_id = ? AND card_id = ? LIMIT 1',
+          [normalizedSetId, nextCardId]
+        );
+
+        if (existingRelation) {
+          throw new Error('This set already contains that card.');
+        }
+
+        await db.runAsync('INSERT INTO set_cards (set_id, card_id) VALUES (?, ?)', [normalizedSetId, nextCardId]);
+        return { cardId: nextCardId };
+      });
+    },
+
+    async updateCard(cardId, { front, type, back }) {
+      const normalizedCardId = Number(cardId);
+      const normalizedCard = normalizeCardInput({ front, type, back });
+      assertValidCardInput(normalizedCard);
+
+      if (!normalizedCardId) {
+        throw new Error('Card not found.');
+      }
+
+      const existingCard = await db.getFirstAsync(
+        'SELECT id FROM cards WHERE id = ? LIMIT 1',
+        [normalizedCardId]
+      );
+
+      if (!existingCard) {
+        throw new Error('Card not found.');
+      }
+
+      const duplicateCard = await db.getFirstAsync(
+        'SELECT id FROM cards WHERE front = ? AND type = ? AND back = ? AND id != ? LIMIT 1',
+        [normalizedCard.front, normalizedCard.type, normalizedCard.back, normalizedCardId]
+      );
+
+      if (duplicateCard) {
+        throw new Error('Another card already uses that front, type, and back.');
+      }
+
+      await db.runAsync('UPDATE cards SET front = ?, type = ?, back = ? WHERE id = ?', [
+        normalizedCard.front,
+        normalizedCard.type,
+        normalizedCard.back,
+        normalizedCardId,
+      ]);
+    },
+
+    async removeCardFromSet({ setId, cardId }) {
+      const normalizedSetId = Number(setId);
+      const normalizedCardId = Number(cardId);
+
+      if (!normalizedSetId || !normalizedCardId) {
+        throw new Error('Card not found.');
+      }
+
+      return db.withTransactionAsync(async () => {
+        const existingRelation = await db.getFirstAsync(
+          'SELECT 1 AS present FROM set_cards WHERE set_id = ? AND card_id = ? LIMIT 1',
+          [normalizedSetId, normalizedCardId]
+        );
+
+        if (!existingRelation) {
+          throw new Error('Card not found in this set.');
+        }
+
+        await db.runAsync('DELETE FROM set_cards WHERE set_id = ? AND card_id = ?', [
+          normalizedSetId,
+          normalizedCardId,
+        ]);
+
+        const remainingRelation = await db.getFirstAsync(
+          'SELECT COUNT(*) AS remaining_count FROM set_cards WHERE card_id = ?',
+          [normalizedCardId]
+        );
+
+        const removedCard = (Number(remainingRelation?.remaining_count) || 0) === 0;
+        if (removedCard) {
+          await db.runAsync('DELETE FROM cards WHERE id = ?', [normalizedCardId]);
+        }
+
+        return { removedCard };
+      });
     },
 
     saveSetting(key, value) {
@@ -391,6 +547,16 @@ export function createWebStorage() {
       return buildSelectedCards(store, selectedSetIds);
     },
 
+    async loadCardsForSet(setId) {
+      const store = readWebStore();
+      const normalizedSetId = Number(setId);
+      if (!normalizedSetId) {
+        return [];
+      }
+
+      return buildCardsForSet(store, normalizedSetId);
+    },
+
     async loadDistractorBiasMap(selectedSetIds) {
       const store = readWebStore();
       const selectedCardIds = new Set(getSelectedCardIds(store, selectedSetIds));
@@ -465,6 +631,120 @@ export function createWebStorage() {
         created_at: nowIso(),
       });
       writeWebStore(store);
+    },
+
+    async createCardInSet({ setId, front, type, back }) {
+      const normalizedSetId = Number(setId);
+      const normalizedCard = normalizeCardInput({ front, type, back });
+      assertValidCardInput(normalizedCard);
+
+      if (!normalizedSetId) {
+        throw new Error('Choose a set first.');
+      }
+
+      const store = readWebStore();
+      const existingSet = store.sets.find((item) => Number(item.id) === normalizedSetId);
+      if (!existingSet) {
+        throw new Error('Set not found.');
+      }
+
+      let cardRecord = store.cards.find(
+        (item) =>
+          item.front === normalizedCard.front &&
+          item.type === normalizedCard.type &&
+          item.back === normalizedCard.back
+      );
+
+      if (!cardRecord) {
+        cardRecord = {
+          id: store.nextIds.card++,
+          front: normalizedCard.front,
+          type: normalizedCard.type,
+          back: normalizedCard.back,
+          created_at: nowIso(),
+        };
+        store.cards.push(cardRecord);
+      }
+
+      const exists = store.setCards.some(
+        (item) => Number(item.set_id) === normalizedSetId && Number(item.card_id) === Number(cardRecord.id)
+      );
+
+      if (exists) {
+        throw new Error('This set already contains that card.');
+      }
+
+      store.setCards.push({
+        set_id: normalizedSetId,
+        card_id: Number(cardRecord.id),
+      });
+      writeWebStore(store);
+      return { cardId: Number(cardRecord.id) };
+    },
+
+    async updateCard(cardId, { front, type, back }) {
+      const normalizedCardId = Number(cardId);
+      const normalizedCard = normalizeCardInput({ front, type, back });
+      assertValidCardInput(normalizedCard);
+
+      if (!normalizedCardId) {
+        throw new Error('Card not found.');
+      }
+
+      const store = readWebStore();
+      const cardRecord = store.cards.find((item) => Number(item.id) === normalizedCardId);
+      if (!cardRecord) {
+        throw new Error('Card not found.');
+      }
+
+      const hasDuplicate = store.cards.some(
+        (item) =>
+          Number(item.id) !== normalizedCardId &&
+          item.front === normalizedCard.front &&
+          item.type === normalizedCard.type &&
+          item.back === normalizedCard.back
+      );
+
+      if (hasDuplicate) {
+        throw new Error('Another card already uses that front, type, and back.');
+      }
+
+      cardRecord.front = normalizedCard.front;
+      cardRecord.type = normalizedCard.type;
+      cardRecord.back = normalizedCard.back;
+      writeWebStore(store);
+    },
+
+    async removeCardFromSet({ setId, cardId }) {
+      const normalizedSetId = Number(setId);
+      const normalizedCardId = Number(cardId);
+
+      if (!normalizedSetId || !normalizedCardId) {
+        throw new Error('Card not found.');
+      }
+
+      const store = readWebStore();
+      const relationExists = store.setCards.some(
+        (item) => Number(item.set_id) === normalizedSetId && Number(item.card_id) === normalizedCardId
+      );
+
+      if (!relationExists) {
+        throw new Error('Card not found in this set.');
+      }
+
+      store.setCards = store.setCards.filter(
+        (item) => !(Number(item.set_id) === normalizedSetId && Number(item.card_id) === normalizedCardId)
+      );
+
+      const removedCard = !store.setCards.some((item) => Number(item.card_id) === normalizedCardId);
+      if (removedCard) {
+        store.cards = store.cards.filter((item) => Number(item.id) !== normalizedCardId);
+        store.quizAnswers = store.quizAnswers.filter((item) => Number(item.card_id) !== normalizedCardId);
+        store.cardProgress = store.cardProgress.filter((item) => Number(item.card_id) !== normalizedCardId);
+      }
+
+      writeWebStore(store);
+      return { removedCard };
     },
 
     async saveSetting(key, value) {
@@ -835,6 +1115,59 @@ function buildSelectedCards(store, selectedSetIds) {
     .sort((left, right) => left.front.localeCompare(right.front));
 }
 
+function buildCardsForSet(store, setId) {
+  const selectedCardIds = new Set(
+    store.setCards
+      .filter((item) => Number(item.set_id) === Number(setId))
+      .map((item) => Number(item.card_id))
+  );
+
+  const setCountByCardId = new Map();
+  for (const relation of store.setCards) {
+    const relationCardId = Number(relation.card_id);
+    const current = setCountByCardId.get(relationCardId) ?? 0;
+    setCountByCardId.set(relationCardId, current + 1);
+  }
+
+  const statsByCardId = getAnswerStatsByCardId(store.quizAnswers);
+  const progressByCardId = new Map(store.cardProgress.map((item) => [item.card_id, item]));
+
+  return store.cards
+    .filter((card) => selectedCardIds.has(Number(card.id)))
+    .map((card) => {
+      const stats = statsByCardId.get(card.id) ?? { attempt_count: 0, correct_count: 0 };
+      const progress = progressByCardId.get(card.id) ?? {};
+
+      return {
+        id: card.id,
+        front: card.front,
+        type: card.type,
+        back_text: card.back,
+        back: formatCardBack(card.type, card.back),
+        set_count: setCountByCardId.get(card.id) ?? 0,
+        attempt_count: stats.attempt_count,
+        correct_count: stats.correct_count,
+        last_reviewed_at: progress.last_reviewed_at ?? null,
+        next_due_at: progress.next_due_at ?? null,
+        correct_streak: Number(progress.correct_streak) || 0,
+        interval_days: Number(progress.interval_days) || 0,
+      };
+    })
+    .sort((left, right) => {
+      const frontComparison = left.front.localeCompare(right.front);
+      if (frontComparison !== 0) {
+        return frontComparison;
+      }
+
+      const typeComparison = String(left.type || '').localeCompare(String(right.type || ''));
+      if (typeComparison !== 0) {
+        return typeComparison;
+      }
+
+      return String(left.back_text || '').localeCompare(String(right.back_text || ''));
+    });
+}
+
 function getSelectedCardIds(store, selectedSetIds) {
   const selectedSetIdSet = new Set(selectedSetIds.map(Number));
   return Array.from(
@@ -1070,6 +1403,24 @@ function getInitialWebStore() {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function normalizeCardInput(card = {}) {
+  return {
+    front: String(card.front || '').trim(),
+    type: String(card.type || '').trim(),
+    back: String(card.back || '').trim(),
+  };
+}
+
+function assertValidCardInput(card) {
+  if (!card.front) {
+    throw new Error('Front is required.');
+  }
+
+  if (!card.back) {
+    throw new Error('Back is required.');
+  }
 }
 
 function getNextCardProgress(previousProgress, isCorrect) {
