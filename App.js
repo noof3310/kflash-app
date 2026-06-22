@@ -286,15 +286,16 @@ function AppShell({ storage }) {
   const cardEditorRequestRef = useRef(0);
   const debugUnlockTapCountRef = useRef(0);
   const debugUnlockTimerRef = useRef(null);
-  const reviewScrollRef = useRef(null);
+  const activeScreenScrollRef = useRef(null);
+  const quizOptionsScrollRef = useRef(null);
   const screenOpacity = useRef(new Animated.Value(0)).current;
   const screenTranslateY = useRef(new Animated.Value(18)).current;
   const heroFloat = useRef(new Animated.Value(10)).current;
   const correctPlayer = useAudioPlayer(CORRECT_SOUND);
   const wrongPlayer = useAudioPlayer(WRONG_SOUND);
-  const scrollReviewToTop = useCallback(() => {
-    const scrollTarget = reviewScrollRef.current?.getNode?.() ?? reviewScrollRef.current;
-    scrollTarget?.scrollTo?.({ y: 0, animated: false });
+  const scrollRefToTop = useCallback((ref) => {
+    const scrollTarget = ref?.current?.getNode?.() ?? ref?.current;
+    scrollTarget?.scrollTo?.({ x: 0, y: 0, animated: false });
   }, []);
 
   const refreshAll = useCallback(async () => {
@@ -429,18 +430,27 @@ function AppShell({ storage }) {
   }, [heroFloat, screen, selectedSetIds.length]);
 
   useLayoutEffect(() => {
-    if (screen !== 'review') {
-      return undefined;
-    }
+    const firstFrameId = requestAnimationFrame(() => {
+      scrollRefToTop(activeScreenScrollRef);
 
-    const frameId = requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        scrollReviewToTop();
+        scrollRefToTop(activeScreenScrollRef);
       });
     });
 
-    return () => cancelAnimationFrame(frameId);
-  }, [reviewCards.length, screen, scrollReviewToTop]);
+    if (screen !== 'quiz') {
+      return () => cancelAnimationFrame(firstFrameId);
+    }
+
+    const secondFrameId = requestAnimationFrame(() => {
+      scrollRefToTop(quizOptionsScrollRef);
+    });
+
+    return () => {
+      cancelAnimationFrame(firstFrameId);
+      cancelAnimationFrame(secondFrameId);
+    };
+  }, [screen, scrollRefToTop]);
 
   const totalCards = cards.length;
   const totalSets = sets.length;
@@ -1659,12 +1669,10 @@ function AppShell({ storage }) {
         <StatusBar style={statusBarStyle} />
         <AnimatedScrollView
           key={`review-${reviewScreenKey}`}
-          ref={reviewScrollRef}
+          ref={activeScreenScrollRef}
           style={animatedScreenStyle}
           contentContainerStyle={[styles.container, styles.containerWithFooter]}
           showsVerticalScrollIndicator={false}
-          onContentSizeChange={scrollReviewToTop}
-          contentOffset={{ x: 0, y: 0 }}
         >
           <View style={styles.quizHeaderRow}>
             <Pressable
@@ -1860,6 +1868,7 @@ function AppShell({ storage }) {
           </View>
 
           <ScrollView
+            ref={quizOptionsScrollRef}
             style={styles.quizOptionsScroll}
             contentContainerStyle={[styles.optionsContainer, styles.optionsContainerCompact]}
             showsVerticalScrollIndicator={false}
@@ -1986,6 +1995,7 @@ function AppShell({ storage }) {
       <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.screenBackground }]}>
         <StatusBar style={statusBarStyle} />
         <AnimatedScrollView
+          ref={activeScreenScrollRef}
           style={animatedScreenStyle}
           contentContainerStyle={[styles.container, styles.containerWithFooter]}
           showsVerticalScrollIndicator={false}
@@ -2064,6 +2074,7 @@ function AppShell({ storage }) {
       <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.screenBackground }]}>
         <StatusBar style={statusBarStyle} />
         <AnimatedScrollView
+          ref={activeScreenScrollRef}
           style={animatedScreenStyle}
           contentContainerStyle={styles.container}
           showsVerticalScrollIndicator={false}
@@ -2323,6 +2334,7 @@ function AppShell({ storage }) {
       <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.screenBackground }]}>
         <StatusBar style={statusBarStyle} />
         <AnimatedScrollView
+          ref={activeScreenScrollRef}
           style={animatedScreenStyle}
           contentContainerStyle={styles.container}
           showsVerticalScrollIndicator={false}
@@ -2552,6 +2564,7 @@ function AppShell({ storage }) {
       <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.screenBackground }]}>
         <StatusBar style={statusBarStyle} />
         <AnimatedScrollView
+          ref={activeScreenScrollRef}
           style={animatedScreenStyle}
           contentContainerStyle={styles.container}
           showsVerticalScrollIndicator={false}
@@ -2694,6 +2707,7 @@ function AppShell({ storage }) {
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.screenBackground }]}>
       <StatusBar style={statusBarStyle} />
     <AnimatedScrollView
+      ref={activeScreenScrollRef}
       style={animatedScreenStyle}
       contentContainerStyle={[styles.container, styles.containerWithFooter]}
       showsVerticalScrollIndicator={false}
