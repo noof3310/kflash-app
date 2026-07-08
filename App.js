@@ -75,9 +75,21 @@ const QUIZ_DONT_KNOW_OPTION = "I don't know the answer";
 const HOME_SET_PREVIEW_COUNT = 8;
 const SET_FILTER_OPTIONS = ['all', 'selected', 'unplayed', 'weak', 'strong'];
 const SET_SORT_OPTIONS = ['priority', 'name', 'lowest score', 'highest score'];
+const APP_AREAS = [
+  { key: 'study', label: 'Study' },
+  { key: 'library', label: 'Library' },
+  { key: 'progress', label: 'Progress' },
+  { key: 'settings', label: 'Settings' },
+];
+const LIBRARY_TABS = [
+  { key: 'folders', label: 'Folders' },
+  { key: 'decks', label: 'Decks' },
+  { key: 'cards', label: 'Cards' },
+  { key: 'import', label: 'Import' },
+];
 const QUIZ_DIRECTION_OPTIONS = [
-  { value: 'front-to-back', label: 'Front -> Back' },
-  { value: 'back-to-front', label: 'Back -> Front' },
+  { value: 'front-to-back', label: 'Word -> Meaning' },
+  { value: 'back-to-front', label: 'Meaning -> Word' },
 ];
 const DEBUG_UNLOCK_TAP_COUNT = 7;
 const DEBUG_UNLOCK_WINDOW_MS = 1800;
@@ -196,6 +208,160 @@ function AutoFitChoiceText({ children, style, ...props }) {
   );
 }
 
+function Button({ colors, variant = 'secondary', children, style, textStyle, disabled, ...props }) {
+  const variantStyle =
+    variant === 'primary'
+      ? { backgroundColor: disabled ? colors.border : colors.primaryButton, borderColor: disabled ? colors.border : colors.primaryButton }
+      : variant === 'danger'
+        ? { backgroundColor: colors.dangerSurface, borderColor: colors.dangerBorder }
+        : variant === 'ghost'
+          ? { backgroundColor: 'transparent', borderColor: 'transparent', shadowOpacity: 0, elevation: 0 }
+          : { backgroundColor: colors.surface, borderColor: colors.border };
+  const variantTextColor =
+    variant === 'primary'
+      ? disabled ? colors.secondaryText : colors.primaryButtonText
+      : variant === 'danger'
+        ? colors.dangerText
+        : colors.primaryText;
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      {...props}
+      disabled={disabled}
+      style={[styles.uiButton, variantStyle, disabled && styles.disabledControl, style]}
+    >
+      <Text style={[styles.uiButtonText, { color: variantTextColor }, textStyle]}>{children}</Text>
+    </Pressable>
+  );
+}
+
+function Chip({ colors, active, children, style, textStyle, disabled, ...props }) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected: Boolean(active), disabled: Boolean(disabled) }}
+      {...props}
+      disabled={disabled}
+      style={[
+        styles.uiChip,
+        { backgroundColor: colors.softSurface, borderColor: colors.border },
+        active && { backgroundColor: colors.primaryText, borderColor: colors.primaryText },
+        disabled && styles.disabledControl,
+        style,
+      ]}
+    >
+      <Text style={[styles.uiChipText, { color: active ? colors.surface : colors.primaryText }, textStyle]}>
+        {children}
+      </Text>
+    </Pressable>
+  );
+}
+
+function Section({ colors, title, children, style }) {
+  return (
+    <View style={[styles.uiSection, { backgroundColor: colors.surface, borderColor: colors.border }, style]}>
+      {title ? <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>{title}</Text> : null}
+      {children}
+    </View>
+  );
+}
+
+function ListRow({ colors, title, meta, status, children, onPress, selected, tone, actionLabel }) {
+  const Wrapper = onPress ? Pressable : View;
+  return (
+    <Wrapper
+      accessibilityRole={onPress ? 'button' : undefined}
+      accessibilityState={onPress ? { selected: Boolean(selected) } : undefined}
+      onPress={onPress}
+      style={[
+        styles.uiListRow,
+        { backgroundColor: colors.elevatedSurface, borderColor: selected ? colors.accentBorder : colors.border },
+        tone,
+      ]}
+    >
+      <View style={styles.uiListRowContent}>
+        <Text style={[styles.uiListRowTitle, { color: colors.primaryText }]}>{title}</Text>
+        {meta ? <Text style={[styles.uiListRowMeta, { color: colors.secondaryText }]}>{meta}</Text> : null}
+        {status ? <Text style={[styles.uiListRowStatus, { color: colors.secondaryText }]}>{status}</Text> : null}
+        {children}
+      </View>
+      {actionLabel ? <Text style={[styles.uiListRowAction, { color: colors.accentText }]}>{actionLabel}</Text> : null}
+    </Wrapper>
+  );
+}
+
+function TextField({ colors, style, ...props }) {
+  return (
+    <TextInput
+      placeholderTextColor={colors.secondaryText}
+      {...props}
+      style={[
+        styles.input,
+        {
+          borderColor: colors.border,
+          backgroundColor: colors.inputBackground,
+          color: colors.primaryText,
+        },
+        style,
+      ]}
+    />
+  );
+}
+
+function EmptyState({ colors, title, message, action }) {
+  return (
+    <View style={[styles.emptyState, { backgroundColor: colors.softSurface, borderColor: colors.border }]}>
+      <Text style={[styles.emptyStateTitle, { color: colors.primaryText }]}>{title}</Text>
+      {message ? <Text style={[styles.mutedText, { color: colors.secondaryText }]}>{message}</Text> : null}
+      {action}
+    </View>
+  );
+}
+
+function InlineNotice({ colors, tone = 'info', children }) {
+  const toneStyle =
+    tone === 'danger'
+      ? { backgroundColor: colors.errorBackground, borderColor: colors.errorBorder }
+      : tone === 'warning'
+        ? { backgroundColor: colors.warningBackground, borderColor: colors.warningBorder }
+        : { backgroundColor: colors.softAccent, borderColor: colors.accentBorder };
+
+  return (
+    <View style={[styles.inlineNotice, toneStyle]}>
+      <Text style={[styles.mutedText, { color: colors.primaryText }]}>{children}</Text>
+    </View>
+  );
+}
+
+function AppNav({ colors, activeArea, onNavigate }) {
+  return (
+    <View style={[styles.appNav, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      {APP_AREAS.map((area) => (
+        <Pressable
+          key={area.key}
+          accessibilityRole="tab"
+          accessibilityState={{ selected: activeArea === area.key }}
+          style={[
+            styles.appNavItem,
+            activeArea === area.key && { backgroundColor: colors.primaryText },
+          ]}
+          onPress={() => onNavigate(area.key)}
+        >
+          <Text
+            style={[
+              styles.appNavText,
+              { color: activeArea === area.key ? colors.surface : colors.secondaryText },
+            ]}
+          >
+            {area.label}
+          </Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
 export default function App() {
   if (Platform.OS === 'web') {
     return (
@@ -230,7 +396,9 @@ function NativeAppShell() {
 }
 
 function AppShell({ storage }) {
-  const [screen, setScreen] = useState('home');
+  const [screen, setScreen] = useState('study');
+  const [libraryTab, setLibraryTab] = useState('folders');
+  const [activeFolderDetailKey, setActiveFolderDetailKey] = useState('');
   const [folders, setFolders] = useState([]);
   const [sets, setSets] = useState([]);
   const [cards, setCards] = useState([]);
@@ -249,6 +417,7 @@ function AppShell({ storage }) {
   const [setSearchQuery, setSetSearchQuery] = useState('');
   const [setFilter, setSetFilter] = useState('all');
   const [setSort, setSetSort] = useState('priority');
+  const [cardSearchQuery, setCardSearchQuery] = useState('');
   const [activeSetFolderId, setActiveSetFolderId] = useState('all');
   const [newFolderName, setNewFolderName] = useState('');
   const [folderActionKey, setFolderActionKey] = useState('');
@@ -420,7 +589,7 @@ function AppShell({ storage }) {
   }, [screen, screenOpacity, screenTranslateY]);
 
   useEffect(() => {
-    if (screen !== 'home') {
+    if (screen !== 'study') {
       return undefined;
     }
 
@@ -523,6 +692,10 @@ function AppShell({ storage }) {
     () => buildSetFolderGroups(filteredSets, foldersForFilteredGroups),
     [filteredSets, foldersForFilteredGroups]
   );
+  const allSetFolderGroups = useMemo(
+    () => buildSetFolderGroups(sets, folders),
+    [folders, sets]
+  );
   const visibleSetFolderGroups = useMemo(
     () => {
       if (showAllSets || normalizedSetSearchQuery) {
@@ -538,6 +711,48 @@ function AppShell({ storage }) {
   const prioritizedCards = useMemo(() => sortCardsForStudy(cards), [cards]);
   const duplicateFrontGroups = useMemo(() => buildDuplicateFrontGroups(cards), [cards]);
   const visibleCards = useMemo(() => prioritizedCards.slice(0, 30), [prioritizedCards]);
+  const dueDeckIds = useMemo(
+    () => sets.filter((item) => (Number(item.due_card_count) || 0) > 0).map((item) => item.id),
+    [sets]
+  );
+  const totalDueCards = useMemo(
+    () => sets.reduce((total, item) => total + (Number(item.due_card_count) || 0), 0),
+    [sets]
+  );
+  const totalNewCards = useMemo(
+    () => sets.reduce((total, item) => total + (Number(item.new_card_count) || 0), 0),
+    [sets]
+  );
+  const weakCards = useMemo(
+    () =>
+      cards.filter((item) => {
+        const accuracy = getCardAccuracyPercent(item);
+        return accuracy !== null && accuracy <= 50;
+      }),
+    [cards]
+  );
+  const activeFolderDetailGroup = useMemo(() => {
+    if (!activeFolderDetailKey) {
+      return null;
+    }
+
+    return allSetFolderGroups.find((group) => group.key === activeFolderDetailKey) ?? null;
+  }, [activeFolderDetailKey, allSetFolderGroups]);
+  const activeFolderDetailSummary = useMemo(
+    () => buildFolderSummary(activeFolderDetailGroup ?? { sets: [] }, selectedSetIds),
+    [activeFolderDetailGroup, selectedSetIds]
+  );
+  const normalizedCardSearchQuery = cardSearchQuery.trim().toLowerCase();
+  const libraryCards = useMemo(() => {
+    const sourceCards = normalizedCardSearchQuery
+      ? cards.filter((item) => {
+          const haystack = `${item.front} ${item.back} ${item.type}`.toLowerCase();
+          return haystack.includes(normalizedCardSearchQuery);
+        })
+      : cards;
+
+    return sortCardsForStudy(sourceCards).slice(0, 80);
+  }, [cards, normalizedCardSearchQuery]);
   const prioritizedReviewCards = useMemo(() => sortCardsForStudy(reviewCards), [reviewCards]);
   const selectedSetSummary = useMemo(
     () =>
@@ -889,7 +1104,7 @@ function AppShell({ storage }) {
     if (!rawRows || rawRows.length < 4) {
       showAlert(
         'Not enough cards',
-        'You need at least 4 unique cards across the selected sets for multiple choice.'
+        'You need at least 4 unique cards across the selected decks for multiple choice.'
       );
       return;
     }
@@ -1087,7 +1302,7 @@ function AppShell({ storage }) {
 
   const openReviewScreen = useCallback(async () => {
     if (selectedSetIds.length === 0) {
-      showAlert('Choose at least one set', 'Pick one or more sets before continuing.');
+      showAlert('Choose at least one deck', 'Pick one or more decks before continuing.');
       return;
     }
 
@@ -1096,7 +1311,7 @@ function AppShell({ storage }) {
       loadDistractorBiasMap(),
     ]);
     if (!rows?.length) {
-      showAlert('No cards found', 'The selected sets do not contain any cards yet.');
+      showAlert('No cards found', 'The selected decks do not contain any cards yet.');
       return;
     }
 
@@ -1105,6 +1320,45 @@ function AppShell({ storage }) {
     setReviewScreenKey((prev) => prev + 1);
     setScreen('review');
   }, [loadDistractorBiasMap, loadSelectedCards, selectedSetIds.length]);
+
+  const openReviewForDeckIds = useCallback(
+    async (deckIds) => {
+      const nextSelectedSetIds = Array.from(new Set((deckIds ?? []).map(Number).filter(Boolean)));
+      if (nextSelectedSetIds.length === 0) {
+        showAlert('Choose at least one deck', 'Pick one or more decks before continuing.');
+        return;
+      }
+
+      const [rows, nextDistractorBiasMap] = await Promise.all([
+        storage.loadSelectedCards(nextSelectedSetIds),
+        storage.loadDistractorBiasMap(nextSelectedSetIds),
+      ]);
+
+      if (!rows?.length) {
+        showAlert('No cards found', 'The selected decks do not contain any cards yet.');
+        return;
+      }
+
+      setSelectedSetIds(nextSelectedSetIds);
+      setReviewCards(rows);
+      setDistractorBiasMap(nextDistractorBiasMap);
+      setReviewScreenKey((prev) => prev + 1);
+      setScreen('review');
+    },
+    [storage]
+  );
+
+  const openFolderDetail = useCallback((folderKey) => {
+    setActiveFolderDetailKey(folderKey);
+    setScreen('folder-detail');
+  }, []);
+
+  const navigateArea = useCallback((areaKey) => {
+    setScreen(areaKey);
+    if (areaKey === 'library') {
+      setShowAllSets(true);
+    }
+  }, []);
 
   const handleImportCsv = async () => {
     try {
@@ -1143,9 +1397,9 @@ function AppShell({ storage }) {
       const rows = parseImportCsvRows(EXAMPLE_CSV_TEXT);
       await storage.importCsvRows(rows);
       await refreshCardEditor();
-      showAlert('Example set ready', `Loaded ${rows.length} cards into the Example set.`);
+      showAlert('Example deck ready', `Loaded ${rows.length} cards into the Example deck.`);
     } catch (error) {
-      showAlert('Could not load example set', error?.message ?? 'Something went wrong while loading the example set.');
+      showAlert('Could not load example deck', error?.message ?? 'Something went wrong while loading the example deck.');
     }
   };
 
@@ -1263,7 +1517,7 @@ function AppShell({ storage }) {
             setQuizIndex(0);
             setAnswers([]);
             setQuizTargetCount(0);
-            setScreen('home');
+            setScreen('study');
             showAlert('Import complete', `Restored learning progress for ${rows.length} cards.`);
           } catch (error) {
             showAlert('Import failed', error?.message ?? 'Could not import learning progress.');
@@ -1346,7 +1600,7 @@ function AppShell({ storage }) {
       await storage.createSetFolder(folderName);
       setNewFolderName('');
       await refreshAll();
-      showAlert('Folder created', `"${folderName}" is ready for sets.`);
+      showAlert('Folder created', `"${folderName}" is ready for decks.`);
     } catch (error) {
       showAlert('Could not create folder', error?.message ?? 'Something went wrong while creating the folder.');
     } finally {
@@ -1362,7 +1616,7 @@ function AppShell({ storage }) {
         await storage.moveSetToFolder(setId, folderId);
         await refreshAll();
       } catch (error) {
-        showAlert('Could not move set', error?.message ?? 'Something went wrong while moving the set.');
+        showAlert('Could not move deck', error?.message ?? 'Something went wrong while moving the deck.');
       } finally {
         setFolderActionKey('');
       }
@@ -1389,7 +1643,7 @@ function AppShell({ storage }) {
 
   const handleAddCardToSet = useCallback(async () => {
     if (!cardEditorSetId) {
-      showAlert('Choose a set', 'Pick a set before adding a card.');
+      showAlert('Choose a deck', 'Pick a deck before adding a card.');
       return;
     }
 
@@ -1401,7 +1655,7 @@ function AppShell({ storage }) {
       });
       setNewCardDraft(createEmptyCardDraft());
       await refreshCardEditor(cardEditorSetId);
-      showAlert('Card added', 'The card is ready in this set.');
+      showAlert('Card added', 'The card is ready in this deck.');
     } catch (error) {
       showAlert('Could not add card', error?.message ?? 'Something went wrong while creating the card.');
     } finally {
@@ -1434,13 +1688,13 @@ function AppShell({ storage }) {
     (card) => {
       const removalMessage =
         Number(card.set_count) > 1
-          ? 'This will remove the card from the current set only. The same card will stay in other sets.'
-          : 'This will delete the card from this set and remove its review history from the device.';
+          ? 'This will remove the card from the current deck only. The same card will stay in other decks.'
+          : 'This will delete the card from this deck and remove its review history from the device.';
 
       showConfirm({
         title: 'Remove card?',
         message: removalMessage,
-        confirmText: Number(card.set_count) > 1 ? 'Remove from set' : 'Delete card',
+        confirmText: Number(card.set_count) > 1 ? 'Remove from deck' : 'Delete card',
         destructive: true,
         onConfirm: async () => {
           setCardEditorActionKey(`delete-${card.id}`);
@@ -1453,8 +1707,8 @@ function AppShell({ storage }) {
             showAlert(
               result?.removedCard ? 'Card deleted' : 'Card removed',
               result?.removedCard
-                ? 'The card was deleted because it was no longer used in any set.'
-                : 'The card was removed from this set.'
+                ? 'The card was deleted because it was no longer used in any deck.'
+                : 'The card was removed from this deck.'
             );
           } catch (error) {
             showAlert('Could not remove card', error?.message ?? 'Something went wrong while removing the card.');
@@ -1513,7 +1767,7 @@ function AppShell({ storage }) {
 
       showConfirm({
         title: 'Merge duplicate fronts?',
-        message: `This will keep "${targetCard.back}" and merge ${sourceCards.length} other card(s) into it. Set links, quiz history, and progress will move to the kept card.`,
+        message: `This will keep "${targetCard.back}" and merge ${sourceCards.length} other card(s) into it. Deck links, quiz history, and progress will move to the kept card.`,
         confirmText: 'Merge cards',
         destructive: true,
         onConfirm: async () => {
@@ -1686,7 +1940,7 @@ function AppShell({ storage }) {
   const clearAllData = useCallback(() => {
     showConfirm({
       title: 'Clear all data?',
-      message: 'This will remove all sets, cards, and quiz history. Speech settings will be kept.',
+      message: 'This will remove all decks, cards, and quiz history. Speech settings will be kept.',
       confirmText: 'Clear everything',
       destructive: true,
       onConfirm: async () => {
@@ -1705,7 +1959,7 @@ function AppShell({ storage }) {
           setQuizIndex(0);
           setAnswers([]);
           setQuizFeedback(null);
-          setScreen('home');
+          setScreen('study');
           await refreshCardEditor();
           showAlert('Data cleared', 'All flash card data has been removed.');
         } catch (error) {
@@ -1742,7 +1996,7 @@ function AppShell({ storage }) {
           setTtsPitch(DEFAULT_TTS_PITCH);
           setTtsVoice(DEFAULT_TTS_VOICE);
           setTtsProvider(DEFAULT_TTS_PROVIDER);
-          setScreen('home');
+          setScreen('study');
           await refreshCardEditor();
           showAlert('Schema reset', 'The local database has been rebuilt.');
         } catch (error) {
@@ -1777,7 +2031,7 @@ function AppShell({ storage }) {
     setDistractorBiasMap({});
     setReviewCards([]);
     setQuizTargetCount(0);
-    setScreen('home');
+    setScreen('study');
   };
 
   const goToReview = useCallback(async () => {
@@ -1790,7 +2044,7 @@ function AppShell({ storage }) {
       setQuizFeedback(null);
       setDistractorBiasMap({});
       setReviewCards([]);
-      setScreen('home');
+      setScreen('study');
       return;
     }
 
@@ -1804,6 +2058,26 @@ function AppShell({ storage }) {
     setReviewScreenKey((prev) => prev + 1);
     setScreen('review');
   }, [loadDistractorBiasMap, loadSelectedCards, refreshCardEditor, selectedSetIds.length]);
+
+  const reviewMissedAnswers = useCallback(async () => {
+    const missedCardIds = new Set(answers.filter((answer) => !answer.isCorrect).map((answer) => answer.cardId));
+    if (missedCardIds.size === 0) {
+      await goToReview();
+      return;
+    }
+
+    const [rows, nextDistractorBiasMap] = await Promise.all([
+      loadSelectedCards(),
+      loadDistractorBiasMap(),
+    ]);
+    const missedRows = (rows ?? []).filter((card) => missedCardIds.has(card.id));
+
+    setQuizFeedback(null);
+    setDistractorBiasMap(nextDistractorBiasMap);
+    setReviewCards(missedRows);
+    setReviewScreenKey((prev) => prev + 1);
+    setScreen('review');
+  }, [answers, goToReview, loadDistractorBiasMap, loadSelectedCards]);
 
   const handleDebugUnlockTap = useCallback(() => {
     debugUnlockTapCountRef.current += 1;
@@ -1847,14 +2121,14 @@ function AppShell({ storage }) {
           </View>
 
           <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>Review selected cards</Text>
+            <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>Review setup</Text>
             <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
-              Scan through the selected cards before choosing how many quiz questions you want.
+              Confirm the deck scope and start with recommended quiz settings.
             </Text>
             <View style={styles.summaryPillRow}>
               <View style={[styles.summaryPill, { backgroundColor: colors.softAccent, borderColor: colors.accentBorder }]}>
                 <Text style={[styles.summaryPillValue, { color: colors.accentText }]}>{selectedSetIds.length}</Text>
-                <Text style={[styles.summaryPillLabel, { color: colors.secondaryText }]}>Sets</Text>
+                <Text style={[styles.summaryPillLabel, { color: colors.secondaryText }]}>Decks</Text>
               </View>
               <View style={[styles.summaryPill, { backgroundColor: colors.softAccent, borderColor: colors.accentBorder }]}>
                 <Text style={[styles.summaryPillValue, { color: colors.accentText }]}>{reviewSummary.newCount}</Text>
@@ -1937,15 +2211,15 @@ function AppShell({ storage }) {
             </View>
             <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
               {isFrontToBackEnabled && isBackToFrontEnabled
-                ? 'Both directions selected'
+                ? 'Mixed direction'
                 : isFrontToBackEnabled
-                  ? 'Front -> Back only'
-                  : 'Back -> Front only'}
+                  ? 'Word -> Meaning only'
+                  : 'Meaning -> Word only'}
             </Text>
           </View>
 
           <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>Cards in selected sets</Text>
+            <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>Priority cards</Text>
             {prioritizedReviewCards.map((item) => (
               <View
                 key={item.id}
@@ -2007,7 +2281,7 @@ function AppShell({ storage }) {
 
           <View style={[styles.quizCard, styles.quizCardCompact, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <Text style={[styles.quizLabel, { color: colors.secondaryText }]}>
-              {currentItem.promptField === 'front' ? 'What matches this card?' : 'Which word matches this meaning?'}
+              {currentItem.promptField === 'front' ? 'Which meaning matches this word?' : 'Which word matches this meaning?'}
             </Text>
             <Text
               numberOfLines={2}
@@ -2096,25 +2370,33 @@ function AppShell({ storage }) {
             >
               <Text style={[styles.feedbackTitle, { color: colors.errorText }]}>Incorrect</Text>
               <Text style={[styles.feedbackDetail, { color: colors.primaryText }]}>
+                {currentItem.promptText}
+              </Text>
+              <Text style={[styles.feedbackDetail, { color: colors.primaryText }]}>
+                You chose: {quizFeedback.chosenBack}
+              </Text>
+              <Text style={[styles.feedbackDetail, { color: colors.primaryText }]}>
                 Correct answer: {quizFeedback.correctOption}
               </Text>
               <Pressable
                 style={[styles.feedbackConfirmButton, { backgroundColor: colors.primaryButton }]}
                 onPress={async () => {
-                  const finalAnswers = [
-                    ...answers,
-                    {
-                      quizItemInstanceId: currentItem.instanceId,
-                      cardId: currentItem.id,
-                      front: currentItem.front,
-                      back: currentItem.back,
-                      promptText: currentItem.promptText,
-                      promptField: currentItem.promptField,
-                      correctOption: currentItem.correctOption,
-                      chosenBack: quizFeedback.chosenBack,
-                      isCorrect: false,
-                    },
-                  ];
+                  const finalAnswers = answers.some((answer) => answer.quizItemInstanceId === currentItem.instanceId)
+                    ? answers
+                    : [
+                        ...answers,
+                        {
+                          quizItemInstanceId: currentItem.instanceId,
+                          cardId: currentItem.id,
+                          front: currentItem.front,
+                          back: currentItem.back,
+                          promptText: currentItem.promptText,
+                          promptField: currentItem.promptField,
+                          correctOption: currentItem.correctOption,
+                          chosenBack: quizFeedback.chosenBack,
+                          isCorrect: false,
+                        },
+                      ];
 
                   setQuizFeedback(null);
 
@@ -2186,7 +2468,9 @@ function AppShell({ storage }) {
           </View>
 
           <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>Quiz summary</Text>
+            <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>
+              {resultSummary.incorrectCount > 0 ? 'Mistakes to review' : 'Quiz summary'}
+            </Text>
             {resultCards.map((item) => (
               <View
                 key={item.quizItemInstanceId}
@@ -2207,7 +2491,7 @@ function AppShell({ storage }) {
                     {item.isCorrect ? 'Correct' : 'Incorrect'}
                   </Text>
                   <Text style={[styles.resultDetail, { color: colors.secondaryText }]}>
-                    {item.correctOption}
+                    Correct answer: {item.correctOption}
                   </Text>
                   {formatReviewStats(item) ? (
                     <Text style={[styles.reviewStatText, { color: colors.secondaryText }]}>
@@ -2221,9 +2505,19 @@ function AppShell({ storage }) {
         </AnimatedScrollView>
 
         <Animated.View style={[styles.stickyFooter, animatedFooterStyle, { backgroundColor: colors.stickySurface, borderColor: colors.border }]}>
-          <Pressable style={[styles.primaryButton, { backgroundColor: colors.primaryButton }]} onPress={goToReview}>
-            <Text style={[styles.primaryButtonText, { color: colors.primaryButtonText }]}>Back to review</Text>
-          </Pressable>
+          <View style={styles.footerActionRow}>
+            <Button
+              colors={colors}
+              variant="primary"
+              onPress={reviewMissedAnswers}
+              disabled={resultSummary.incorrectCount === 0}
+              style={styles.footerActionButton}
+            >
+              Review missed
+            </Button>
+            <Button colors={colors} onPress={goToReview} style={styles.footerActionButton}>Study again</Button>
+            <Button colors={colors} variant="ghost" onPress={goHome} style={styles.footerActionButton}>Done</Button>
+          </View>
         </Animated.View>
       </SafeAreaView>
     );
@@ -2242,7 +2536,7 @@ function AppShell({ storage }) {
           <View style={styles.quizHeaderRow}>
             <Pressable
               style={[styles.secondaryButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
-              onPress={goHome}
+              onPress={() => setScreen('settings')}
             >
               <Text style={[styles.secondaryButtonText, { color: colors.primaryText }]}>Back</Text>
             </Pressable>
@@ -2502,7 +2796,7 @@ function AppShell({ storage }) {
           <View style={styles.quizHeaderRow}>
             <Pressable
               style={[styles.secondaryButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
-              onPress={() => setScreen('home')}
+              onPress={() => setScreen('library')}
             >
               <Text style={[styles.secondaryButtonText, { color: colors.primaryText }]}>Back</Text>
             </Pressable>
@@ -2511,20 +2805,20 @@ function AppShell({ storage }) {
           <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>Edit cards</Text>
             <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
-              Choose one set to add, edit, or remove cards directly. Removing a card only affects this set unless the card is not used anywhere else. If a card is shared across sets, saving edits updates that shared card.
+              Choose one deck to add, edit, or remove cards directly. Removing a card only affects this deck unless the card is not used anywhere else. If a card is shared across decks, saving edits updates that shared card.
             </Text>
           </View>
 
           {sets.length === 0 ? (
             <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
               <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
-                No sets yet. Import a CSV first, then cards in that set can be edited here.
+                No decks yet. Import a CSV first, then cards in that deck can be edited here.
               </Text>
             </View>
           ) : (
             <>
               <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                <Text style={[styles.settingsLabel, { color: colors.primaryText }]}>Choose set</Text>
+                <Text style={[styles.settingsLabel, { color: colors.primaryText }]}>Choose deck</Text>
                 <View style={styles.filterRow}>
                   {sets.map((item) => {
                     const active = item.id === cardEditorSetId;
@@ -2562,7 +2856,7 @@ function AppShell({ storage }) {
 
               <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                 <View style={[styles.cardEditorPanel, { backgroundColor: colors.elevatedSurface, borderColor: colors.border }]}>
-                  <Text style={[styles.settingsLabel, { color: colors.primaryText }]}>Add card to this set</Text>
+                  <Text style={[styles.settingsLabel, { color: colors.primaryText }]}>Add card to this deck</Text>
                   <TextInput
                     value={newCardDraft.front}
                     onChangeText={(value) => updateNewCardField('front', value)}
@@ -2617,10 +2911,10 @@ function AppShell({ storage }) {
                 </View>
 
                 {cardEditorLoading ? (
-                  <Text style={[styles.mutedText, { color: colors.secondaryText }]}>Loading cards for this set...</Text>
+                  <Text style={[styles.mutedText, { color: colors.secondaryText }]}>Loading cards for this deck...</Text>
                 ) : cardEditorCards.length === 0 ? (
                   <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
-                    This set has no cards yet. Add the first card above.
+                    This deck has no cards yet. Add the first card above.
                   </Text>
                 ) : (
                   cardEditorCards.map((card) => {
@@ -2638,7 +2932,7 @@ function AppShell({ storage }) {
                             {draft.front.trim() || card.front}
                           </Text>
                           <Text style={[styles.cardEditorMeta, { color: colors.secondaryText }]}>
-                            {Number(card.set_count) > 1 ? `Shared with ${card.set_count - 1} other set(s)` : 'Only in this set'}
+                            {Number(card.set_count) > 1 ? `Shared with ${card.set_count - 1} other deck(s)` : 'Only in this deck'}
                           </Text>
                         </View>
                         <TextInput
@@ -2732,7 +3026,7 @@ function AppShell({ storage }) {
           <View style={styles.quizHeaderRow}>
             <Pressable
               style={[styles.secondaryButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
-              onPress={() => setScreen('home')}
+              onPress={() => setScreen('library')}
             >
               <Text style={[styles.secondaryButtonText, { color: colors.primaryText }]}>Back</Text>
             </Pressable>
@@ -2783,7 +3077,7 @@ function AppShell({ storage }) {
                           <View style={{ flex: 1 }}>
                             <Text style={[styles.cardBack, { color: colors.primaryText }]}>{card.back}</Text>
                             <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
-                              {card.set_count || 0} sets
+                              {card.set_count || 0} decks
                               {formatReviewStats(card) ? ` • ${formatReviewStats(card)}` : ''}
                             </Text>
                           </View>
@@ -2858,6 +3152,613 @@ function AppShell({ storage }) {
               );
             })
           )}
+        </AnimatedScrollView>
+      </SafeAreaView>
+    );
+  }
+
+  if (screen === 'folder-detail') {
+    const group = activeFolderDetailGroup;
+    const summary = activeFolderDetailSummary;
+    const selectedDecksInFolder = (group?.sets ?? []).filter((item) => selectedSetIds.includes(item.id));
+
+    return (
+      <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.screenBackground }]}>
+        <StatusBar style={statusBarStyle} />
+        <AnimatedScrollView
+          ref={activeScreenScrollRef}
+          style={animatedScreenStyle}
+          contentContainerStyle={[styles.container, styles.containerWithFooter]}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.quizHeaderRow}>
+            <Button colors={colors} variant="ghost" onPress={() => setScreen('study')}>Back to Study</Button>
+          </View>
+
+          {!group ? (
+            <EmptyState
+              colors={colors}
+              title="Folder not found"
+              message="This folder may have been removed or renamed."
+              action={<Button colors={colors} onPress={() => setScreen('study')}>Return to Study</Button>}
+            />
+          ) : (
+            <>
+              <Section colors={colors}>
+                <Text style={[styles.pageTitle, { color: colors.primaryText }]}>{group.name}</Text>
+                <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
+                  {summary.setCount} decks • {summary.cardCount} cards • {summary.dueCount} due • {summary.newCount} new
+                </Text>
+                <View style={styles.actionsRow}>
+                  <Button
+                    colors={colors}
+                    variant="primary"
+                    onPress={() => openReviewForDeckIds(group.sets.map((item) => item.id))}
+                    disabled={group.sets.length === 0}
+                  >
+                    Study folder
+                  </Button>
+                  <Button
+                    colors={colors}
+                    onPress={() => openReviewForDeckIds(selectedDecksInFolder.map((item) => item.id))}
+                    disabled={selectedDecksInFolder.length === 0}
+                  >
+                    Study selected
+                  </Button>
+                </View>
+              </Section>
+
+              <Section colors={colors} title="Decks in this folder">
+                {group.sets.length === 0 ? (
+                  <EmptyState
+                    colors={colors}
+                    title="No decks in this folder"
+                    message="Move decks into this folder from Library."
+                    action={<Button colors={colors} onPress={() => { setLibraryTab('decks'); setScreen('library'); }}>Open Library</Button>}
+                  />
+                ) : (
+                  group.sets.map((deck) => {
+                    const selected = selectedSetIds.includes(deck.id);
+                    return (
+                      <ListRow
+                        key={deck.id}
+                        colors={colors}
+                        title={deck.name}
+                        meta={formatSetStats(deck)}
+                        selected={selected}
+                        tone={getSetReviewTone(deck, colors)}
+                        actionLabel={selected ? 'Selected' : 'Tap to select'}
+                        onPress={() => toggleSetSelection(deck.id)}
+                      />
+                    );
+                  })
+                )}
+              </Section>
+            </>
+          )}
+        </AnimatedScrollView>
+      </SafeAreaView>
+    );
+  }
+
+  if (screen === 'library') {
+    return (
+      <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.screenBackground }]}>
+        <StatusBar style={statusBarStyle} />
+        <AnimatedScrollView
+          ref={activeScreenScrollRef}
+          style={animatedScreenStyle}
+          contentContainerStyle={styles.container}
+          showsVerticalScrollIndicator={false}
+        >
+          <AppNav colors={colors} activeArea="library" onNavigate={navigateArea} />
+          <View style={styles.screenHeader}>
+            <Text style={[styles.pageTitle, { color: colors.primaryText }]}>Library</Text>
+            <Text style={[styles.subtitle, { color: colors.secondaryText }]}>
+              Organize folders, decks, cards, and imports away from the study flow.
+            </Text>
+          </View>
+
+          <View style={styles.filterRow}>
+            {LIBRARY_TABS.map((tab) => (
+              <Chip key={tab.key} colors={colors} active={libraryTab === tab.key} onPress={() => setLibraryTab(tab.key)}>
+                {tab.label}
+              </Chip>
+            ))}
+          </View>
+
+          {libraryTab === 'folders' ? (
+            <>
+              <Section colors={colors} title="Create folder">
+                <View style={styles.folderCreateRow}>
+                  <TextField
+                    colors={colors}
+                    value={newFolderName}
+                    onChangeText={setNewFolderName}
+                    placeholder="Folder name"
+                    style={styles.folderNameInput}
+                  />
+                  <Button
+                    colors={colors}
+                    onPress={handleCreateSetFolder}
+                    disabled={folderActionKey === 'create-folder'}
+                    style={styles.folderCreateButton}
+                  >
+                    {folderActionKey === 'create-folder' ? 'Creating...' : 'Create'}
+                  </Button>
+                </View>
+              </Section>
+
+              <Section colors={colors} title="Folders">
+                {allSetFolderGroups.length === 0 ? (
+                  <EmptyState
+                    colors={colors}
+                    title="No folders yet"
+                    message="Import a CSV or create a folder to organize decks."
+                  />
+                ) : (
+                  allSetFolderGroups.map((group) => {
+                    const summary = buildFolderSummary(group, selectedSetIds);
+                    return (
+                      <View key={group.key} style={[styles.managementCard, { backgroundColor: colors.softSurface, borderColor: colors.border }]}>
+                        <ListRow
+                          colors={colors}
+                          title={group.name}
+                          meta={formatFolderStats(summary).replace(/sets/g, 'decks')}
+                        />
+                        <View style={styles.actionsRow}>
+                          <Button colors={colors} onPress={() => openFolderDetail(group.key)}>View folder</Button>
+                          <Button
+                            colors={colors}
+                            variant="primary"
+                            onPress={() => openReviewForDeckIds(group.sets.map((item) => item.id))}
+                            disabled={group.sets.length === 0}
+                          >
+                            Study
+                          </Button>
+                        </View>
+                      </View>
+                    );
+                  })
+                )}
+              </Section>
+            </>
+          ) : null}
+
+          {libraryTab === 'decks' ? (
+            <Section colors={colors} title="Decks">
+              <TextField
+                colors={colors}
+                value={setSearchQuery}
+                onChangeText={setSetSearchQuery}
+                placeholder="Search decks"
+                style={styles.searchInput}
+              />
+              <View style={styles.filterRow}>
+                {SET_FILTER_OPTIONS.map((value) => (
+                  <Chip key={value} colors={colors} active={setFilter === value} onPress={() => setSetFilter(value)}>
+                    {value}
+                  </Chip>
+                ))}
+              </View>
+              <View style={styles.filterRow}>
+                {SET_SORT_OPTIONS.map((value) => (
+                  <Chip key={value} colors={colors} active={setSort === value} onPress={() => setSetSort(value)}>
+                    {value}
+                  </Chip>
+                ))}
+              </View>
+              {filteredSets.length === 0 ? (
+                <EmptyState colors={colors} title="No decks found" message="Adjust search or filters." />
+              ) : (
+                filteredSets.map((deck) => {
+                  const currentFolderId = Number(deck.folder_id) || null;
+                  return (
+                    <View key={deck.id} style={[styles.managementCard, { backgroundColor: colors.softSurface, borderColor: colors.border }]}>
+                      <ListRow
+                        colors={colors}
+                        title={deck.name}
+                        meta={formatSetStats(deck)}
+                        selected={selectedSetIds.includes(deck.id)}
+                        tone={getSetReviewTone(deck, colors)}
+                        actionLabel={selectedSetIds.includes(deck.id) ? 'Selected' : ''}
+                        onPress={() => toggleSetSelection(deck.id)}
+                      />
+                      <View style={styles.setFolderActions}>
+                        <Text style={[styles.setFolderActionLabel, { color: colors.secondaryText }]}>Move to folder</Text>
+                        <View style={styles.filterRow}>
+                          {folderOptions.map((folder) => {
+                            const targetFolderId = folder.id || null;
+                            const active = currentFolderId === targetFolderId;
+                            const actionKey = `move-${deck.id}-${targetFolderId ?? 'none'}`;
+                            return (
+                              <Chip
+                                key={`library-move-${deck.id}-${folder.key}`}
+                                colors={colors}
+                                active={active}
+                                disabled={active || folderActionKey === actionKey}
+                                onPress={() => handleMoveSetToFolder(deck.id, targetFolderId)}
+                              >
+                                {folderActionKey === actionKey ? 'Moving...' : folder.name}
+                              </Chip>
+                            );
+                          })}
+                        </View>
+                      </View>
+                    </View>
+                  );
+                })
+              )}
+            </Section>
+          ) : null}
+
+          {libraryTab === 'cards' ? (
+            <>
+              {duplicateFrontGroups.length ? (
+                <InlineNotice colors={colors} tone="warning">
+                  {duplicateFrontGroups.length} duplicate word group(s) need review.
+                </InlineNotice>
+              ) : null}
+              <Section colors={colors} title="Cards">
+                <View style={styles.actionsRow}>
+                  <Button colors={colors} onPress={() => setScreen('card-editor')}>Open card editor</Button>
+                  <Button colors={colors} onPress={() => setScreen('duplicates')} disabled={duplicateFrontGroups.length === 0}>
+                    Duplicate issues
+                  </Button>
+                </View>
+                <TextField
+                  colors={colors}
+                  value={cardSearchQuery}
+                  onChangeText={setCardSearchQuery}
+                  placeholder="Search cards"
+                  style={styles.searchInput}
+                />
+                {cards.length === 0 ? (
+                  <EmptyState colors={colors} title="No cards yet" message="Import a CSV or add cards in the editor." />
+                ) : (
+                  libraryCards.map((card) => (
+                    <ListRow
+                      key={card.id}
+                      colors={colors}
+                      title={card.front}
+                      meta={card.back}
+                      status={formatReviewStats(card)}
+                      tone={getCardReviewTone(card, colors)}
+                    />
+                  ))
+                )}
+              </Section>
+            </>
+          ) : null}
+
+          {libraryTab === 'import' ? (
+            <Section colors={colors} title="Import vocabulary">
+              <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
+                CSV columns: <Text style={[styles.inlineCodeText, { color: colors.primaryText }]}>front,type,back,set</Text>. The set column becomes the deck name.
+              </Text>
+              <View style={[styles.csvExampleCard, { backgroundColor: colors.inputBackground, borderColor: colors.border }]}>
+                <Text style={[styles.csvExampleText, { color: colors.primaryText }]}>
+                  {'front,type,back,set\n가다,v.,go,Day 01\n오늘,n.,today,Day 01'}
+                </Text>
+              </View>
+              <View style={styles.actionsRow}>
+                <Button colors={colors} variant="primary" onPress={handleImportCsv} disabled={importing}>
+                  {importing ? 'Importing...' : 'Import CSV'}
+                </Button>
+                <Button colors={colors} onPress={handleImportExampleSet}>Load example</Button>
+              </View>
+            </Section>
+          ) : null}
+        </AnimatedScrollView>
+      </SafeAreaView>
+    );
+  }
+
+  if (screen === 'progress') {
+    return (
+      <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.screenBackground }]}>
+        <StatusBar style={statusBarStyle} />
+        <AnimatedScrollView
+          ref={activeScreenScrollRef}
+          style={animatedScreenStyle}
+          contentContainerStyle={styles.container}
+          showsVerticalScrollIndicator={false}
+        >
+          <AppNav colors={colors} activeArea="progress" onNavigate={navigateArea} />
+          <View style={styles.screenHeader}>
+            <Text style={[styles.pageTitle, { color: colors.primaryText }]}>Progress</Text>
+            <Text style={[styles.subtitle, { color: colors.secondaryText }]}>Focus on what needs review next.</Text>
+          </View>
+
+          <View style={styles.statsRow}>
+            <View style={[styles.statCard, { backgroundColor: colors.elevatedSurface, borderColor: colors.border }]}>
+              <Text style={[styles.statValue, { color: colors.primaryText }]}>{totalDueCards}</Text>
+              <Text style={[styles.statLabel, { color: colors.secondaryText }]}>Due</Text>
+            </View>
+            <View style={[styles.statCard, { backgroundColor: colors.elevatedSurface, borderColor: colors.border }]}>
+              <Text style={[styles.statValue, { color: colors.primaryText }]}>{weakCards.length}</Text>
+              <Text style={[styles.statLabel, { color: colors.secondaryText }]}>Weak</Text>
+            </View>
+            <View style={[styles.statCard, { backgroundColor: colors.elevatedSurface, borderColor: colors.border }]}>
+              <Text style={[styles.statValue, { color: colors.primaryText }]}>{totalNewCards}</Text>
+              <Text style={[styles.statLabel, { color: colors.secondaryText }]}>New</Text>
+            </View>
+          </View>
+
+          <Section colors={colors} title="Folder progress">
+            {allSetFolderGroups.length === 0 ? (
+              <EmptyState colors={colors} title="No progress yet" message="Import a deck and complete a review to see progress." />
+            ) : (
+              allSetFolderGroups.map((group) => {
+                const summary = buildFolderSummary(group, selectedSetIds);
+                return (
+                  <ListRow
+                    key={`progress-${group.key}`}
+                    colors={colors}
+                    title={group.name}
+                    meta={`${summary.cardCount} cards • ${summary.dueCount} due • ${summary.newCount} new`}
+                    onPress={() => openFolderDetail(group.key)}
+                    actionLabel="Open"
+                  />
+                );
+              })
+            )}
+          </Section>
+
+          <Section colors={colors} title="Weak cards">
+            {weakCards.length === 0 ? (
+              <EmptyState colors={colors} title="No weak cards" message="Cards below 50% accuracy will appear here." />
+            ) : (
+              sortCardsForStudy(weakCards).slice(0, 20).map((card) => (
+                <ListRow
+                  key={`weak-${card.id}`}
+                  colors={colors}
+                  title={card.front}
+                  meta={card.back}
+                  status={formatReviewStats(card)}
+                  tone={getCardReviewTone(card, colors)}
+                />
+              ))
+            )}
+          </Section>
+
+          <Section colors={colors} title="Exports">
+            <View style={styles.actionsRow}>
+              <Button colors={colors} onPress={handleExportLearningProgress}>Export progress</Button>
+              <Button colors={colors} onPress={handleExportVocabulary}>Export vocabulary</Button>
+            </View>
+          </Section>
+        </AnimatedScrollView>
+      </SafeAreaView>
+    );
+  }
+
+  if (screen === 'settings') {
+    return (
+      <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.screenBackground }]}>
+        <StatusBar style={statusBarStyle} />
+        <AnimatedScrollView
+          ref={activeScreenScrollRef}
+          style={animatedScreenStyle}
+          contentContainerStyle={styles.container}
+          showsVerticalScrollIndicator={false}
+        >
+          <AppNav colors={colors} activeArea="settings" onNavigate={navigateArea} />
+          <View style={styles.screenHeader}>
+            <Text style={[styles.pageTitle, { color: colors.primaryText }]}>Settings</Text>
+            <Text style={[styles.subtitle, { color: colors.secondaryText }]}>Preferences, backups, and advanced tools.</Text>
+          </View>
+
+          <Section colors={colors} title="Appearance">
+            <View style={styles.filterRow}>
+              {['light', 'dark', 'pink'].map((value) => (
+                <Chip key={value} colors={colors} active={theme === value} onPress={() => updateTheme(value)}>
+                  {value === 'light' ? 'Light' : value === 'dark' ? 'Dark' : 'Pink'}
+                </Chip>
+              ))}
+            </View>
+          </Section>
+
+          <Section colors={colors} title="Audio">
+            <View style={styles.filterRow}>
+              {[
+                ['TTS', ttsEnabled, () => updateSpeechSetting('tts_enabled', !ttsEnabled, setTtsEnabled)],
+                ['SFX', sfxEnabled, () => updateSpeechSetting('sfx_enabled', !sfxEnabled, setSfxEnabled)],
+                ['Auto-play', autoPlayTtsEnabled, () => updateSpeechSetting('tts_autoplay_enabled', !autoPlayTtsEnabled, setAutoPlayTtsEnabled)],
+              ].map(([label, active, onPress]) => (
+                <Chip key={label} colors={colors} active={active} onPress={onPress}>
+                  {label}: {active ? 'On' : 'Off'}
+                </Chip>
+              ))}
+            </View>
+
+            <Text style={[styles.settingsLabel, { color: colors.primaryText }]}>Provider</Text>
+            <View style={styles.filterRow}>
+              {TTS_PROVIDER_OPTIONS.map((option) => (
+                <Chip
+                  key={option.value}
+                  colors={colors}
+                  active={ttsProvider === option.value}
+                  onPress={() => updateSpeechSetting('tts_provider', option.value, setTtsProvider)}
+                >
+                  {option.label}
+                </Chip>
+              ))}
+            </View>
+            <Text style={[styles.mutedText, { color: colors.secondaryText }]}>{currentTtsProviderStatus.message}</Text>
+
+            <Text style={[styles.settingsLabel, { color: colors.primaryText }]}>TTS volume</Text>
+            <View style={styles.filterRow}>
+              {VOLUME_OPTIONS.map((value) => (
+                <Chip
+                  key={`tts-volume-${value}`}
+                  colors={colors}
+                  active={ttsVolume === value}
+                  onPress={() => updateSpeechSetting('tts_volume', value, setTtsVolume)}
+                >
+                  {Math.round(value * 100)}%
+                </Chip>
+              ))}
+            </View>
+
+            <Text style={[styles.settingsLabel, { color: colors.primaryText }]}>SFX volume</Text>
+            <View style={styles.filterRow}>
+              {VOLUME_OPTIONS.map((value) => (
+                <Chip
+                  key={`sfx-volume-${value}`}
+                  colors={colors}
+                  active={sfxVolume === value}
+                  onPress={() => updateSpeechSetting('sfx_volume', value, setSfxVolume)}
+                >
+                  {Math.round(value * 100)}%
+                </Chip>
+              ))}
+            </View>
+
+            {!usesFixedGoogleTtsSettings ? (
+              <>
+                <Text style={[styles.settingsLabel, { color: colors.primaryText }]}>Speed</Text>
+                <View style={styles.filterRow}>
+                  {TTS_RATE_OPTIONS.map((value) => (
+                    <Chip key={`rate-${value}`} colors={colors} active={ttsRate === value} onPress={() => updateSpeechSetting('tts_rate', value, setTtsRate)}>
+                      {value.toFixed(1)}x
+                    </Chip>
+                  ))}
+                </View>
+                <Text style={[styles.settingsLabel, { color: colors.primaryText }]}>Pitch</Text>
+                <View style={styles.filterRow}>
+                  {TTS_PITCH_OPTIONS.map((value) => (
+                    <Chip key={`pitch-${value}`} colors={colors} active={ttsPitch === value} onPress={() => updateSpeechSetting('tts_pitch', value, setTtsPitch)}>
+                      {value.toFixed(1)}
+                    </Chip>
+                  ))}
+                </View>
+              </>
+            ) : (
+              <Text style={[styles.mutedText, { color: colors.secondaryText }]}>Google provider uses default speed and pitch.</Text>
+            )}
+
+            {ttsEnabled ? <Button colors={colors} onPress={() => speakFrontText(findSpeechPreviewText(cards))}>Preview speech</Button> : null}
+          </Section>
+
+          <Section colors={colors} title="Data">
+            <View style={styles.actionsRow}>
+              <Button colors={colors} onPress={handleImportLearningProgress}>Import progress</Button>
+              <Button colors={colors} onPress={handleExportLearningProgress}>Export progress</Button>
+            </View>
+            <Button colors={colors} onPress={handleExportVocabulary}>Export vocabulary</Button>
+          </Section>
+
+          <Section colors={colors} title="Advanced">
+            <View style={styles.actionsRow}>
+              <Button colors={colors} onPress={() => setScreen('debug')}>Speech debug</Button>
+              <Button colors={colors} variant="danger" onPress={clearAllData}>Clear all data</Button>
+            </View>
+          </Section>
+        </AnimatedScrollView>
+      </SafeAreaView>
+    );
+  }
+
+  if (screen === 'study') {
+    const hasDueDecks = dueDeckIds.length > 0;
+
+    return (
+      <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.screenBackground }]}>
+        <StatusBar style={statusBarStyle} />
+        <AnimatedScrollView
+          ref={activeScreenScrollRef}
+          style={animatedScreenStyle}
+          contentContainerStyle={styles.container}
+          showsVerticalScrollIndicator={false}
+        >
+          <AppNav colors={colors} activeArea="study" onNavigate={navigateArea} />
+
+          <Animated.View style={[styles.studyHero, animatedHeroStyle, { backgroundColor: colors.heroSurface, borderColor: colors.heroBorder }]}>
+            <Text style={[styles.pageTitle, { color: colors.primaryText }]}>Study</Text>
+            <Text style={[styles.subtitle, { color: colors.secondaryText }]}>
+              Start with due cards or choose a folder.
+            </Text>
+            <View style={styles.summaryPillRow}>
+              <View style={[styles.summaryPill, { backgroundColor: colors.heroBadgeBackground, borderColor: colors.heroBorder }]}>
+                <Text style={[styles.summaryPillValue, { color: colors.heroBadgeText }]}>{totalDueCards}</Text>
+                <Text style={[styles.summaryPillLabel, { color: colors.secondaryText }]}>Due</Text>
+              </View>
+              <View style={[styles.summaryPill, { backgroundColor: colors.heroBadgeBackground, borderColor: colors.heroBorder }]}>
+                <Text style={[styles.summaryPillValue, { color: colors.heroBadgeText }]}>{totalNewCards}</Text>
+                <Text style={[styles.summaryPillLabel, { color: colors.secondaryText }]}>New</Text>
+              </View>
+              <View style={[styles.summaryPill, { backgroundColor: colors.heroBadgeBackground, borderColor: colors.heroBorder }]}>
+                <Text style={[styles.summaryPillValue, { color: colors.heroBadgeText }]}>{weakCards.length}</Text>
+                <Text style={[styles.summaryPillLabel, { color: colors.secondaryText }]}>Weak</Text>
+              </View>
+            </View>
+            <View style={styles.actionsRow}>
+              <Button
+                colors={colors}
+                variant="primary"
+                onPress={() => openReviewForDeckIds(hasDueDecks ? dueDeckIds : sets.map((item) => item.id))}
+                disabled={sets.length === 0}
+              >
+                {hasDueDecks ? 'Study due cards' : 'Start review'}
+              </Button>
+              <Button colors={colors} onPress={() => { setLibraryTab('import'); setScreen('library'); }}>
+                Import
+              </Button>
+            </View>
+          </Animated.View>
+
+          <Section colors={colors} title="Folders">
+            {allSetFolderGroups.length === 0 ? (
+              <EmptyState
+                colors={colors}
+                title="No decks yet"
+                message="Import a CSV to create your first deck."
+                action={<Button colors={colors} variant="primary" onPress={() => { setLibraryTab('import'); setScreen('library'); }}>Import CSV</Button>}
+              />
+            ) : (
+              allSetFolderGroups.map((group) => {
+                const summary = buildFolderSummary(group, selectedSetIds);
+                return (
+                  <View key={`study-${group.key}`} style={[styles.folderStudyCard, { backgroundColor: colors.softSurface, borderColor: colors.border }]}>
+                    <ListRow
+                      colors={colors}
+                      title={group.name}
+                      meta={`${summary.setCount} decks • ${summary.cardCount} cards • ${summary.dueCount} due • ${summary.newCount} new`}
+                    />
+                    <View style={styles.actionsRow}>
+                      <Button colors={colors} onPress={() => openFolderDetail(group.key)}>Choose decks</Button>
+                      <Button
+                        colors={colors}
+                        variant="primary"
+                        onPress={() => openReviewForDeckIds(group.sets.map((item) => item.id))}
+                        disabled={group.sets.length === 0}
+                      >
+                        Study folder
+                      </Button>
+                    </View>
+                  </View>
+                );
+              })
+            )}
+          </Section>
+
+          <Section colors={colors} title="Needs attention">
+            {weakCards.length === 0 ? (
+              <Text style={[styles.mutedText, { color: colors.secondaryText }]}>Weak cards will appear here after a few reviews.</Text>
+            ) : (
+              sortCardsForStudy(weakCards).slice(0, 5).map((card) => (
+                <ListRow
+                  key={`study-weak-${card.id}`}
+                  colors={colors}
+                  title={card.front}
+                  meta={card.back}
+                  status={formatReviewStats(card)}
+                  tone={getCardReviewTone(card, colors)}
+                />
+              ))
+            )}
+          </Section>
         </AnimatedScrollView>
       </SafeAreaView>
     );
@@ -4027,6 +4928,141 @@ const styles = StyleSheet.create({
   container: {
     padding: 20,
     gap: 16,
+  },
+  appNav: {
+    flexDirection: 'row',
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 4,
+    gap: 4,
+  },
+  appNavItem: {
+    flex: 1,
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  appNavText: {
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  screenHeader: {
+    gap: 6,
+  },
+  pageTitle: {
+    fontSize: 28,
+    lineHeight: 34,
+    fontWeight: '800',
+  },
+  uiSection: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 16,
+    gap: 12,
+  },
+  uiButton: {
+    minHeight: 44,
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#0f172a',
+    shadowOpacity: 0.03,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 1,
+  },
+  uiButtonText: {
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  uiChip: {
+    minHeight: 36,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  uiChipText: {
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  uiListRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 12,
+  },
+  uiListRowContent: {
+    flex: 1,
+    gap: 3,
+  },
+  uiListRowTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  uiListRowMeta: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  uiListRowStatus: {
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  uiListRowAction: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  emptyState: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 16,
+    gap: 10,
+  },
+  emptyStateTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+  },
+  inlineNotice: {
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 12,
+  },
+  managementCard: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 10,
+    gap: 10,
+  },
+  folderStudyCard: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 10,
+    gap: 10,
+  },
+  studyHero: {
+    borderRadius: 16,
+    padding: 18,
+    borderWidth: 1,
+    gap: 14,
+  },
+  footerActionRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  footerActionButton: {
+    flex: 1,
+    paddingHorizontal: 8,
+  },
+  disabledControl: {
+    opacity: 0.55,
   },
   heroCard: {
     position: 'relative',
