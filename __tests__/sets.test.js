@@ -1,4 +1,4 @@
-import { buildEnrichedSets, filterAndSortSets, formatSetStats } from '../src/lib/sets';
+import { buildEnrichedSets, buildSetFolderGroups, filterAndSortSets, formatSetStats } from '../src/lib/sets';
 
 describe('set helpers', () => {
   test('buildEnrichedSets computes average score and quiz counts per set', () => {
@@ -66,5 +66,25 @@ describe('set helpers', () => {
         average_score_percent: 62,
       })
     ).toBe('24 cards • 6 due • 3 new • 5 quizzes • 62% avg');
+  });
+
+  test('buildSetFolderGroups groups sets into one folder layer with no folder first', () => {
+    const groups = buildSetFolderGroups(
+      [
+        { id: 1, name: 'Loose', folder_id: null },
+        { id: 2, name: 'Basics', folder_id: 10 },
+        { id: 3, name: 'Travel', folder_id: 11 },
+      ],
+      [
+        { id: 11, name: 'Trips' },
+        { id: 10, name: 'Core' },
+      ]
+    );
+
+    expect(groups.map((group) => [group.name, group.sets.map((set) => set.name)])).toEqual([
+      ['No folder', ['Loose']],
+      ['Core', ['Basics']],
+      ['Trips', ['Travel']],
+    ]);
   });
 });

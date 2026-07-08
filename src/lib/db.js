@@ -1,4 +1,4 @@
-const DATABASE_VERSION = 2;
+const DATABASE_VERSION = 3;
 
 const SCHEMA_SQL = `
   CREATE TABLE IF NOT EXISTS app_settings (
@@ -6,10 +6,18 @@ const SCHEMA_SQL = `
     value TEXT NOT NULL
   );
 
-  CREATE TABLE IF NOT EXISTS sets (
+  CREATE TABLE IF NOT EXISTS set_folders (
     id INTEGER PRIMARY KEY NOT NULL,
     name TEXT NOT NULL UNIQUE,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS sets (
+    id INTEGER PRIMARY KEY NOT NULL,
+    name TEXT NOT NULL UNIQUE,
+    folder_id INTEGER,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (folder_id) REFERENCES set_folders(id) ON DELETE SET NULL
   );
 
   CREATE TABLE IF NOT EXISTS cards (
@@ -66,6 +74,12 @@ export async function migrateDbIfNeeded(db) {
   `);
 
   await db.execAsync(SCHEMA_SQL);
+
+  const setColumns = await db.getAllAsync('PRAGMA table_info(sets)');
+  if (!(setColumns ?? []).some((column) => column.name === 'folder_id')) {
+    await db.execAsync('ALTER TABLE sets ADD COLUMN folder_id INTEGER');
+  }
+
   await db.execAsync(`PRAGMA user_version = ${DATABASE_VERSION}`);
 }
 

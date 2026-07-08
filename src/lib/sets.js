@@ -86,6 +86,53 @@ export function filterAndSortSets(sets, options = {}) {
   return sortableSets.sort((left, right) => compareSets(left, right, setSort));
 }
 
+export function buildSetFolderGroups(sets, folders = []) {
+  const folderById = new Map(
+    (folders ?? []).map((folder) => [
+      Number(folder.id),
+      {
+        id: Number(folder.id),
+        name: String(folder.name || '').trim(),
+      },
+    ])
+  );
+  const groupMap = new Map();
+
+  const noFolderGroup = {
+    id: null,
+    key: 'folder-none',
+    name: 'No folder',
+    sets: [],
+  };
+  groupMap.set(noFolderGroup.key, noFolderGroup);
+
+  for (const folder of folderById.values()) {
+    if (!folder.id || !folder.name) {
+      continue;
+    }
+
+    groupMap.set(`folder-${folder.id}`, {
+      ...folder,
+      key: `folder-${folder.id}`,
+      sets: [],
+    });
+  }
+
+  for (const set of sets ?? []) {
+    const folderId = Number(set.folder_id) || null;
+    const groupKey = folderId && groupMap.has(`folder-${folderId}`) ? `folder-${folderId}` : 'folder-none';
+    groupMap.get(groupKey).sets.push(set);
+  }
+
+  return Array.from(groupMap.values())
+    .filter((group) => group.sets.length > 0)
+    .sort((left, right) => {
+      if (left.id === null && right.id !== null) return -1;
+      if (left.id !== null && right.id === null) return 1;
+      return left.name.localeCompare(right.name);
+    });
+}
+
 export function formatSetStats(set) {
   const parts = [`${Number(set.card_count) || 0} cards`];
   const dueCardCount = Number(set.due_card_count) || 0;

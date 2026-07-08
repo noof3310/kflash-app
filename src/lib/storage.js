@@ -7,7 +7,7 @@ export function createNativeStorage(db) {
   return {
     async getDashboardData() {
       const fetchedSets = await db.getAllAsync(
-        `SELECT s.id, s.name, s.created_at,
+        `SELECT s.id, s.name, s.folder_id, f.name AS folder_name, s.created_at,
                 COUNT(DISTINCT sc.card_id) AS card_count,
                 COALESCE(SUM(CASE WHEN COALESCE(qa_stats.attempt_count, 0) = 0 THEN 1 ELSE 0 END), 0) AS new_card_count,
                 COALESCE(SUM(CASE
@@ -15,6 +15,7 @@ export function createNativeStorage(db) {
                   ELSE 0
                 END), 0) AS due_card_count
          FROM sets s
+         LEFT JOIN set_folders f ON f.id = s.folder_id
          LEFT JOIN set_cards sc ON sc.set_id = s.id
          LEFT JOIN (
            SELECT card_id, COUNT(*) AS attempt_count
@@ -22,8 +23,14 @@ export function createNativeStorage(db) {
            GROUP BY card_id
          ) qa_stats ON qa_stats.card_id = sc.card_id
          LEFT JOIN card_progress cp ON cp.card_id = sc.card_id
-         GROUP BY s.id, s.name, s.created_at
-         ORDER BY s.name COLLATE NOCASE ASC`
+         GROUP BY s.id, s.name, s.folder_id, f.name, s.created_at
+         ORDER BY COALESCE(f.name, '') COLLATE NOCASE ASC, s.name COLLATE NOCASE ASC`
+      );
+
+      const folders = await db.getAllAsync(
+        `SELECT id, name, created_at
+         FROM set_folders
+         ORDER BY name COLLATE NOCASE ASC`
       );
 
       const sessionRows = await db.getAllAsync(
@@ -62,6 +69,7 @@ export function createNativeStorage(db) {
       );
 
       return {
+        folders: folders ?? [],
         sets: buildEnrichedSets(fetchedSets, sessionRows),
         cards: cards ?? [],
       };
@@ -178,6 +186,47 @@ export function createNativeStorage(db) {
 
     createSet(name) {
       return db.runAsync('INSERT INTO sets (name) VALUES (?)', [name]);
+    },
+
+    async createSetFolder(name) {
+      const normalizedName = normalizeFolderName(name);
+      if (!normalizedName) {
+        throw new Error('Folder name is required.');
+      }
+
+      try {
+        return await db.runAsync('INSERT INTO set_folders (name) VALUES (?)', [normalizedName]);
+      } catch (error) {
+        throw new Error('A folder with that name already exists.');
+      }
+    },
+
+    async moveSetToFolder(setId, folderId) {
+      const normalizedSetId = Number(setId);
+      const normalizedFolderId = Number(folderId) || null;
+
+      if (!normalizedSetId) {
+        throw new Error('Set not found.');
+      }
+
+      if (normalizedFolderId) {
+        const existingFolder = await db.getFirstAsync(
+          'SELECT id FROM set_folders WHERE id = ? LIMIT 1',
+          [normalizedFolderId]
+        );
+        if (!existingFolder) {
+          throw new Error('Folder not found.');
+        }
+      }
+
+      const result = await db.runAsync('UPDATE sets SET folder_id = ? WHERE id = ?', [
+        normalizedFolderId,
+        normalizedSetId,
+      ]);
+
+      if (!result.changes) {
+        throw new Error('Set not found.');
+      }
     },
 
     async createCardInSet({ setId, front, type, back }) {
@@ -467,6 +516,7 @@ export function createNativeStorage(db) {
         DROP TABLE IF EXISTS card_progress;
         DROP TABLE IF EXISTS cards;
         DROP TABLE IF EXISTS sets;
+        DROP TABLE IF EXISTS set_folders;
         DROP TABLE IF EXISTS app_settings;
         PRAGMA user_version = 0;
       `);
@@ -537,6 +587,7 @@ export function createWebStorage() {
     async getDashboardData() {
       const store = readWebStore();
       return {
+        folders: [...store.folders].sort((left, right) => left.name.localeCompare(right.name)),
         sets: buildEnrichedSets(buildFetchedSets(store), store.quizSessions),
         cards: buildCardRows(store),
       };
@@ -586,6 +637,7 @@ export function createWebStorage() {
           setRecord = {
             id: store.nextIds.set++,
             name: row.set,
+            folder_id: null,
             created_at: nowIso(),
           };
           store.sets.push(setRecord);
@@ -628,8 +680,52 @@ export function createWebStorage() {
       store.sets.push({
         id: store.nextIds.set++,
         name,
+        folder_id: null,
         created_at: nowIso(),
       });
+      writeWebStore(store);
+    },
+
+    async createSetFolder(name) {
+      const normalizedName = normalizeFolderName(name);
+      if (!normalizedName) {
+        throw new Error('Folder name is required.');
+      }
+
+      const store = readWebStore();
+      if (store.folders.some((item) => item.name.toLowerCase() === normalizedName.toLowerCase())) {
+        throw new Error('A folder with that name already exists.');
+      }
+
+      store.folders.push({
+        id: store.nextIds.folder++,
+        name: normalizedName,
+        created_at: nowIso(),
+      });
+      writeWebStore(store);
+    },
+
+    async moveSetToFolder(setId, folderId) {
+      const normalizedSetId = Number(setId);
+      const normalizedFolderId = Number(folderId) || null;
+      if (!normalizedSetId) {
+        throw new Error('Set not found.');
+      }
+
+      const store = readWebStore();
+      const setRecord = store.sets.find((item) => Number(item.id) === normalizedSetId);
+      if (!setRecord) {
+        throw new Error('Set not found.');
+      }
+
+      if (
+        normalizedFolderId &&
+        !store.folders.some((item) => Number(item.id) === normalizedFolderId)
+      ) {
+        throw new Error('Folder not found.');
+      }
+
+      setRecord.folder_id = normalizedFolderId;
       writeWebStore(store);
     },
 
@@ -823,6 +919,7 @@ export function createWebStorage() {
             setRecord = {
               id: store.nextIds.set++,
               name: setName,
+              folder_id: null,
               created_at: nowIso(),
             };
             store.sets.push(setRecord);
@@ -1020,6 +1117,7 @@ function buildFetchedSets(store) {
   }
 
   const progressByCardId = new Map(store.cardProgress.map((item) => [item.card_id, item]));
+  const folderNameById = new Map(store.folders.map((folder) => [Number(folder.id), folder.name]));
 
   return store.sets
     .map((set) => {
@@ -1041,13 +1139,22 @@ function buildFetchedSets(store) {
       return {
         id: set.id,
         name: set.name,
+        folder_id: Number(set.folder_id) || null,
+        folder_name: folderNameById.get(Number(set.folder_id)) || '',
         created_at: set.created_at,
         card_count: cardIds.length,
         new_card_count: newCardCount,
         due_card_count: dueCardCount,
       };
     })
-    .sort((left, right) => left.name.localeCompare(right.name));
+    .sort((left, right) => {
+      const folderComparison = String(left.folder_name || '').localeCompare(String(right.folder_name || ''));
+      if (folderComparison !== 0) {
+        return folderComparison;
+      }
+
+      return left.name.localeCompare(right.name);
+    });
 }
 
 function buildCardRows(store) {
@@ -1364,16 +1471,35 @@ function writeWebStore(store) {
 
 function normalizeWebStore(store = {}) {
   const initial = getInitialWebStore();
+  const folders = Array.isArray(store.folders)
+    ? store.folders
+        .map((folder) => ({
+          ...folder,
+          id: Number(folder.id),
+          name: normalizeFolderName(folder.name),
+          created_at: folder.created_at || nowIso(),
+        }))
+        .filter((folder) => folder.id && folder.name)
+    : [];
+  const folderIds = new Set(folders.map((folder) => Number(folder.id)));
+
   return {
-    version: 1,
+    version: 2,
     nextIds: {
       set: Number(store?.nextIds?.set) || initial.nextIds.set,
+      folder: Number(store?.nextIds?.folder) || initial.nextIds.folder,
       card: Number(store?.nextIds?.card) || initial.nextIds.card,
       quizSession: Number(store?.nextIds?.quizSession) || initial.nextIds.quizSession,
       quizAnswer: Number(store?.nextIds?.quizAnswer) || initial.nextIds.quizAnswer,
     },
     appSettings: { ...(store.appSettings ?? {}) },
-    sets: Array.isArray(store.sets) ? store.sets : [],
+    folders,
+    sets: Array.isArray(store.sets)
+      ? store.sets.map((set) => ({
+          ...set,
+          folder_id: folderIds.has(Number(set.folder_id)) ? Number(set.folder_id) : null,
+        }))
+      : [],
     cards: Array.isArray(store.cards) ? store.cards : [],
     setCards: Array.isArray(store.setCards) ? store.setCards : [],
     quizSessions: Array.isArray(store.quizSessions) ? store.quizSessions : [],
@@ -1384,14 +1510,16 @@ function normalizeWebStore(store = {}) {
 
 function getInitialWebStore() {
   return {
-    version: 1,
+    version: 2,
     nextIds: {
       set: 1,
+      folder: 1,
       card: 1,
       quizSession: 1,
       quizAnswer: 1,
     },
     appSettings: {},
+    folders: [],
     sets: [],
     cards: [],
     setCards: [],
@@ -1411,6 +1539,10 @@ function normalizeCardInput(card = {}) {
     type: String(card.type || '').trim(),
     back: String(card.back || '').trim(),
   };
+}
+
+function normalizeFolderName(name) {
+  return String(name || '').trim().replace(/\s+/g, ' ');
 }
 
 function assertValidCardInput(card) {
