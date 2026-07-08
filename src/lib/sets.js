@@ -125,7 +125,7 @@ export function buildSetFolderGroups(sets, folders = []) {
   }
 
   return Array.from(groupMap.values())
-    .filter((group) => group.sets.length > 0)
+    .filter((group) => group.id !== null || group.sets.length > 0)
     .sort((left, right) => {
       if (left.id === null && right.id !== null) return -1;
       if (left.id !== null && right.id === null) return 1;

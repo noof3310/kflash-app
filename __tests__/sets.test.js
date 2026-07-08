@@ -87,4 +87,17 @@ describe('set helpers', () => {
       ['Trips', ['Travel']],
     ]);
   });
+
+  test('buildSetFolderGroups keeps empty folders visible', () => {
+    const groups = buildSetFolderGroups([], [{ id: 12, name: 'Empty folder' }]);
+
+    expect(groups).toEqual([
+      {
+        id: 12,
+        key: 'folder-12',
+        name: 'Empty folder',
+        sets: [],
+      },
+    ]);
+  });
 });

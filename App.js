@@ -252,6 +252,8 @@ function AppShell({ storage }) {
   const [activeSetFolderId, setActiveSetFolderId] = useState('all');
   const [newFolderName, setNewFolderName] = useState('');
   const [folderActionKey, setFolderActionKey] = useState('');
+  const [expandedFolderKeys, setExpandedFolderKeys] = useState({});
+  const [editingFolderKeys, setEditingFolderKeys] = useState({});
   const [showAllSets, setShowAllSets] = useState(false);
   const [cardEditorSetId, setCardEditorSetId] = useState(null);
   const [cardEditorCards, setCardEditorCards] = useState([]);
@@ -495,18 +497,44 @@ function AppShell({ storage }) {
       setSort,
     });
   }, [folderFilteredSets, normalizedSetSearchQuery, selectedSetIds, setFilter, setSort]);
-  const visibleSets = useMemo(() => {
-    if (showAllSets || normalizedSetSearchQuery) {
-      return filteredSets;
+  const foldersForFilteredGroups = useMemo(() => {
+    if (activeSetFolderId === 'none') {
+      return [];
     }
 
-    return filteredSets.slice(0, HOME_SET_PREVIEW_COUNT);
-  }, [filteredSets, normalizedSetSearchQuery, showAllSets]);
-  const visibleSetFolderGroups = useMemo(
-    () => buildSetFolderGroups(visibleSets, folders),
-    [folders, visibleSets]
+    const activeFolders =
+      activeSetFolderId === 'all'
+        ? folders
+        : folders.filter((folder) => Number(folder.id) === Number(activeSetFolderId));
+
+    if (!normalizedSetSearchQuery) {
+      return activeFolders;
+    }
+
+    return activeFolders.filter((folder) => {
+      const folderId = Number(folder.id);
+      return (
+        String(folder.name || '').toLowerCase().includes(normalizedSetSearchQuery) ||
+        filteredSets.some((set) => Number(set.folder_id) === folderId)
+      );
+    });
+  }, [activeSetFolderId, filteredSets, folders, normalizedSetSearchQuery]);
+  const filteredSetFolderGroups = useMemo(
+    () => buildSetFolderGroups(filteredSets, foldersForFilteredGroups),
+    [filteredSets, foldersForFilteredGroups]
   );
-  const hasMoreSetsToShow = !normalizedSetSearchQuery && filteredSets.length > HOME_SET_PREVIEW_COUNT;
+  const visibleSetFolderGroups = useMemo(
+    () => {
+      if (showAllSets || normalizedSetSearchQuery) {
+        return filteredSetFolderGroups;
+      }
+
+      return filteredSetFolderGroups.slice(0, HOME_SET_PREVIEW_COUNT);
+    },
+    [filteredSetFolderGroups, normalizedSetSearchQuery, showAllSets]
+  );
+  const hasMoreSetFoldersToShow =
+    !normalizedSetSearchQuery && filteredSetFolderGroups.length > HOME_SET_PREVIEW_COUNT;
   const prioritizedCards = useMemo(() => sortCardsForStudy(cards), [cards]);
   const duplicateFrontGroups = useMemo(() => buildDuplicateFrontGroups(cards), [cards]);
   const visibleCards = useMemo(() => prioritizedCards.slice(0, 30), [prioritizedCards]);
@@ -781,7 +809,7 @@ function AppShell({ storage }) {
 
   useEffect(() => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-  }, [activeSetFolderId, answers.length, filteredSets.length, folders.length, quizFeedback, reviewCards.length, selectedSetIds.length, showAllSets]);
+  }, [activeSetFolderId, answers.length, editingFolderKeys, expandedFolderKeys, filteredSets.length, folders.length, quizFeedback, reviewCards.length, selectedSetIds.length, showAllSets]);
 
   const toggleQuizDirection = useCallback((direction) => {
     setQuizDirectionMode((currentMode) => {
@@ -1252,6 +1280,59 @@ function AppShell({ storage }) {
       prev.includes(setId) ? prev.filter((id) => id !== setId) : [...prev, setId]
     );
   };
+
+  const setFolderSelection = useCallback((folderSets, selected) => {
+    const folderSetIds = (folderSets ?? []).map((item) => item.id);
+    if (!folderSetIds.length) {
+      return;
+    }
+
+    const folderSetIdSet = new Set(folderSetIds);
+    setSelectedSetIds((prev) =>
+      selected
+        ? Array.from(new Set([...prev, ...folderSetIds]))
+        : prev.filter((setId) => !folderSetIdSet.has(setId))
+    );
+  }, []);
+
+  const toggleFolderSelection = useCallback((folderSets) => {
+    const folderSetIds = (folderSets ?? []).map((item) => item.id);
+    if (!folderSetIds.length) {
+      return;
+    }
+
+    const folderSetIdSet = new Set(folderSetIds);
+    setSelectedSetIds((prev) => {
+      const allSelected = folderSetIds.every((setId) => prev.includes(setId));
+      return allSelected
+        ? prev.filter((setId) => !folderSetIdSet.has(setId))
+        : Array.from(new Set([...prev, ...folderSetIds]));
+    });
+  }, []);
+
+  const toggleFolderExpanded = useCallback((folderKey) => {
+    setExpandedFolderKeys((prev) => ({
+      ...prev,
+      [folderKey]: !prev[folderKey],
+    }));
+  }, []);
+
+  const toggleFolderEditing = useCallback((folderKey) => {
+    setEditingFolderKeys((prev) => {
+      const nextEditing = !prev[folderKey];
+      if (nextEditing) {
+        setExpandedFolderKeys((expandedPrev) => ({
+          ...expandedPrev,
+          [folderKey]: true,
+        }));
+      }
+
+      return {
+        ...prev,
+        [folderKey]: nextEditing,
+      };
+    });
+  }, []);
 
   const handleCreateSetFolder = useCallback(async () => {
     const folderName = newFolderName.trim();
@@ -3031,95 +3112,194 @@ function AppShell({ storage }) {
         )}
         {sets.length === 0 ? (
           <Text style={[styles.mutedText, { color: colors.secondaryText }]}>No sets yet. Import a CSV or create a set first.</Text>
-        ) : visibleSets.length === 0 ? (
+        ) : visibleSetFolderGroups.length === 0 ? (
           <Text style={[styles.mutedText, { color: colors.secondaryText }]}>No sets match your current search or filters.</Text>
         ) : (
-          visibleSetFolderGroups.map((group) => (
-            <View key={group.key} style={styles.setFolderGroup}>
-              {activeSetFolderId === 'all' ? (
-                <Text style={[styles.folderGroupTitle, { color: colors.secondaryText }]}>
-                  {group.name}
-                </Text>
-              ) : null}
-              {group.sets.map((item) => {
-                const isSelected = selectedSetIds.includes(item.id);
-                const currentFolderId = Number(item.folder_id) || null;
-                return (
-                  <View key={item.id} style={styles.setRowWrap}>
-                    <Pressable
+          visibleSetFolderGroups.map((group) => {
+            const folderSummary = buildFolderSummary(group, selectedSetIds);
+            const expanded = Boolean(expandedFolderKeys[group.key]);
+            const editing = Boolean(editingFolderKeys[group.key]);
+            return (
+              <View
+                key={group.key}
+                style={[
+                  styles.folderCard,
+                  { backgroundColor: colors.softSurface, borderColor: folderSummary.allSelected ? colors.accentBorder : colors.border },
+                  folderSummary.allSelected && styles.folderCardSelected,
+                ]}
+              >
+                <Pressable
+                  style={styles.folderCardMain}
+                  onPress={() => toggleFolderSelection(group.sets)}
+                  disabled={group.sets.length === 0}
+                >
+                  <View style={styles.folderCardHeader}>
+                    <View style={styles.folderCardTitleBlock}>
+                      <Text style={[styles.folderCardTitle, { color: colors.primaryText }]}>{group.name}</Text>
+                      <Text style={[styles.setMetaText, { color: colors.secondaryText }]}>
+                        {formatFolderStats(folderSummary)}
+                      </Text>
+                    </View>
+                    <View
                       style={[
-                        styles.setRow,
-                        { backgroundColor: colors.softSurface, borderColor: colors.border },
-                        getSetReviewTone(item, colors),
-                        isSelected && styles.setRowSelected,
-                        isSelected && { borderColor: colors.accentBorder },
+                        styles.setSelectionBadge,
+                        {
+                          borderColor: folderSummary.anySelected ? colors.accentBorder : colors.border,
+                          backgroundColor: folderSummary.anySelected ? colors.softAccent : 'transparent',
+                        },
                       ]}
-                      onPress={() => toggleSetSelection(item.id)}
                     >
-                      <View style={styles.setRowContent}>
-                        <Text style={[styles.setName, { color: colors.primaryText }]}>{item.name}</Text>
-                        <Text style={[styles.setMetaText, { color: colors.secondaryText }]}>
-                          {formatSetStats(item)}
-                        </Text>
-                        <Text style={[styles.setMetaText, { color: colors.secondaryText }]}>
-                          Folder: {item.folder_name || 'No folder'}
-                        </Text>
-                      </View>
-                      <View
-                        style={[
-                          styles.setSelectionBadge,
-                          {
-                            borderColor: isSelected ? colors.accentBorder : colors.border,
-                            backgroundColor: isSelected ? colors.softAccent : 'transparent',
-                          },
-                        ]}
-                      >
-                        <Text style={[styles.checkbox, { color: isSelected ? colors.accentText : colors.secondaryText }]}>
-                          {isSelected ? '✓' : '○'}
-                        </Text>
-                      </View>
-                    </Pressable>
-                    {folderOptions.length > 1 || currentFolderId ? (
-                      <View style={styles.setFolderActions}>
-                        <Text style={[styles.setFolderActionLabel, { color: colors.secondaryText }]}>Move to</Text>
-                        <View style={styles.filterRow}>
-                          {folderOptions.map((folder) => {
-                            const targetFolderId = folder.id || null;
-                            const active = currentFolderId === targetFolderId;
-                            const actionKey = `move-${item.id}-${targetFolderId ?? 'none'}`;
-                            return (
-                              <Pressable
-                                key={`move-${item.id}-${folder.key}`}
-                                style={[
-                                  styles.folderMoveChip,
-                                  { backgroundColor: colors.softSurface, borderColor: colors.border },
-                                  active && { backgroundColor: colors.primaryText, borderColor: colors.primaryText },
-                                ]}
-                                onPress={() => handleMoveSetToFolder(item.id, targetFolderId)}
-                                disabled={active || folderActionKey === actionKey}
-                              >
-                                <Text style={[styles.folderMoveChipText, { color: active ? colors.surface : colors.primaryText }]}>
-                                  {folderActionKey === actionKey ? 'Moving...' : folder.name}
-                                </Text>
-                              </Pressable>
-                            );
-                          })}
-                        </View>
-                      </View>
-                    ) : null}
+                      <Text style={[styles.checkbox, { color: folderSummary.anySelected ? colors.accentText : colors.secondaryText }]}>
+                        {folderSummary.allSelected ? '✓' : folderSummary.anySelected ? '◐' : '○'}
+                      </Text>
+                    </View>
                   </View>
-                );
-              })}
-            </View>
-          ))
+                  <View style={styles.folderSummaryGrid}>
+                    <View style={[styles.folderSummaryPill, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                      <Text style={[styles.folderSummaryValue, { color: colors.primaryText }]}>{folderSummary.setCount}</Text>
+                      <Text style={[styles.folderSummaryLabel, { color: colors.secondaryText }]}>Sets</Text>
+                    </View>
+                    <View style={[styles.folderSummaryPill, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                      <Text style={[styles.folderSummaryValue, { color: colors.primaryText }]}>{folderSummary.cardCount}</Text>
+                      <Text style={[styles.folderSummaryLabel, { color: colors.secondaryText }]}>Cards</Text>
+                    </View>
+                    <View style={[styles.folderSummaryPill, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                      <Text style={[styles.folderSummaryValue, { color: colors.primaryText }]}>{folderSummary.dueCount}</Text>
+                      <Text style={[styles.folderSummaryLabel, { color: colors.secondaryText }]}>Due</Text>
+                    </View>
+                    <View style={[styles.folderSummaryPill, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                      <Text style={[styles.folderSummaryValue, { color: colors.primaryText }]}>{folderSummary.selectedCount}</Text>
+                      <Text style={[styles.folderSummaryLabel, { color: colors.secondaryText }]}>Selected</Text>
+                    </View>
+                  </View>
+                </Pressable>
+
+                <View style={styles.folderCardActions}>
+                  <Pressable
+                    style={[styles.folderActionButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                    onPress={() => toggleFolderExpanded(group.key)}
+                  >
+                    <Text style={[styles.folderActionButtonText, { color: colors.primaryText }]}>
+                      {expanded ? 'Hide sets' : 'Expand'}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.folderActionButton, { backgroundColor: editing ? colors.primaryText : colors.surface, borderColor: editing ? colors.primaryText : colors.border }]}
+                    onPress={() => toggleFolderEditing(group.key)}
+                  >
+                    <Text style={[styles.folderActionButtonText, { color: editing ? colors.surface : colors.primaryText }]}>
+                      {editing ? 'Done' : 'Edit selection'}
+                    </Text>
+                  </Pressable>
+                </View>
+
+                {editing ? (
+                  <View style={styles.folderEditActions}>
+                    <Pressable
+                      style={[styles.folderActionButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                      onPress={() => setFolderSelection(group.sets, true)}
+                      disabled={group.sets.length === 0 || folderSummary.allSelected}
+                    >
+                      <Text style={[styles.folderActionButtonText, { color: colors.primaryText }]}>Select all</Text>
+                    </Pressable>
+                    <Pressable
+                      style={[styles.folderActionButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                      onPress={() => setFolderSelection(group.sets, false)}
+                      disabled={group.sets.length === 0 || !folderSummary.anySelected}
+                    >
+                      <Text style={[styles.folderActionButtonText, { color: colors.primaryText }]}>Clear</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
+
+                {expanded ? (
+                  <View style={styles.folderSetList}>
+                    {group.sets.length === 0 ? (
+                      <Text style={[styles.mutedText, { color: colors.secondaryText }]}>
+                        No sets in this folder yet.
+                      </Text>
+                    ) : (
+                      group.sets.map((item) => {
+                        const isSelected = selectedSetIds.includes(item.id);
+                        const currentFolderId = Number(item.folder_id) || null;
+                        return (
+                          <View key={item.id} style={styles.setRowWrap}>
+                            <Pressable
+                              style={[
+                                styles.setRow,
+                                styles.folderSetRow,
+                                { backgroundColor: colors.surface, borderColor: colors.border },
+                                getSetReviewTone(item, colors),
+                                isSelected && styles.setRowSelected,
+                                isSelected && { borderColor: colors.accentBorder },
+                              ]}
+                              onPress={() => toggleSetSelection(item.id)}
+                            >
+                              <View style={styles.setRowContent}>
+                                <Text style={[styles.setName, { color: colors.primaryText }]}>{item.name}</Text>
+                                <Text style={[styles.setMetaText, { color: colors.secondaryText }]}>
+                                  {formatSetStats(item)}
+                                </Text>
+                              </View>
+                              <View
+                                style={[
+                                  styles.setSelectionBadge,
+                                  {
+                                    borderColor: isSelected ? colors.accentBorder : colors.border,
+                                    backgroundColor: isSelected ? colors.softAccent : 'transparent',
+                                  },
+                                ]}
+                              >
+                                <Text style={[styles.checkbox, { color: isSelected ? colors.accentText : colors.secondaryText }]}>
+                                  {isSelected ? '✓' : '○'}
+                                </Text>
+                              </View>
+                            </Pressable>
+                            {editing && (folderOptions.length > 1 || currentFolderId) ? (
+                              <View style={styles.setFolderActions}>
+                                <Text style={[styles.setFolderActionLabel, { color: colors.secondaryText }]}>Move to</Text>
+                                <View style={styles.filterRow}>
+                                  {folderOptions.map((folder) => {
+                                    const targetFolderId = folder.id || null;
+                                    const active = currentFolderId === targetFolderId;
+                                    const actionKey = `move-${item.id}-${targetFolderId ?? 'none'}`;
+                                    return (
+                                      <Pressable
+                                        key={`move-${item.id}-${folder.key}`}
+                                        style={[
+                                          styles.folderMoveChip,
+                                          { backgroundColor: colors.surface, borderColor: colors.border },
+                                          active && { backgroundColor: colors.primaryText, borderColor: colors.primaryText },
+                                        ]}
+                                        onPress={() => handleMoveSetToFolder(item.id, targetFolderId)}
+                                        disabled={active || folderActionKey === actionKey}
+                                      >
+                                        <Text style={[styles.folderMoveChipText, { color: active ? colors.surface : colors.primaryText }]}>
+                                          {folderActionKey === actionKey ? 'Moving...' : folder.name}
+                                        </Text>
+                                      </Pressable>
+                                    );
+                                  })}
+                                </View>
+                              </View>
+                            ) : null}
+                          </View>
+                        );
+                      })
+                    )}
+                  </View>
+                ) : null}
+              </View>
+            );
+          })
         )}
-        {(hasMoreSetsToShow || (showAllSets && !normalizedSetSearchQuery)) ? (
+        {(hasMoreSetFoldersToShow || (showAllSets && !normalizedSetSearchQuery)) ? (
           <Pressable
             style={[styles.secondaryButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
             onPress={() => setShowAllSets((prev) => !prev)}
           >
             <Text style={[styles.secondaryButtonText, { color: colors.primaryText }]}>
-              {showAllSets ? 'Show less' : `Show all ${filteredSets.length} sets`}
+              {showAllSets ? 'Show less' : `Show all ${filteredSetFolderGroups.length} folders`}
             </Text>
           </Pressable>
         ) : null}
@@ -3459,6 +3639,48 @@ function getSetReviewTone(set, colors) {
   }
 
   return getAccuracyTone(Number(set.average_score_percent), colors);
+}
+
+function buildFolderSummary(group, selectedSetIds = []) {
+  const selectedSetIdSet = new Set(selectedSetIds);
+  const setsInFolder = group?.sets ?? [];
+  const selectedCount = setsInFolder.filter((set) => selectedSetIdSet.has(set.id)).length;
+
+  return setsInFolder.reduce(
+    (summary, set) => ({
+      ...summary,
+      cardCount: summary.cardCount + (Number(set.card_count) || 0),
+      dueCount: summary.dueCount + (Number(set.due_card_count) || 0),
+      newCount: summary.newCount + (Number(set.new_card_count) || 0),
+    }),
+    {
+      setCount: setsInFolder.length,
+      selectedCount,
+      cardCount: 0,
+      dueCount: 0,
+      newCount: 0,
+      anySelected: selectedCount > 0,
+      allSelected: setsInFolder.length > 0 && selectedCount === setsInFolder.length,
+    }
+  );
+}
+
+function formatFolderStats(summary) {
+  const parts = [`${summary.setCount} sets`, `${summary.cardCount} cards`];
+
+  if (summary.dueCount > 0) {
+    parts.push(`${summary.dueCount} due`);
+  }
+
+  if (summary.newCount > 0) {
+    parts.push(`${summary.newCount} new`);
+  }
+
+  if (summary.selectedCount > 0) {
+    parts.push(`${summary.selectedCount} selected`);
+  }
+
+  return parts.join(' • ');
 }
 
 function createEmptyCardDraft() {
@@ -4066,6 +4288,11 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     elevation: 1,
   },
+  folderSetRow: {
+    shadowOpacity: 0.02,
+    shadowRadius: 6,
+    elevation: 0,
+  },
   setRowWrap: {
     gap: 8,
   },
@@ -4089,6 +4316,84 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   setFolderGroup: {
+    gap: 10,
+  },
+  folderCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 12,
+    gap: 10,
+    shadowColor: '#0f172a',
+    shadowOpacity: 0.04,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 2,
+  },
+  folderCardSelected: {
+    borderWidth: 2,
+  },
+  folderCardMain: {
+    gap: 10,
+  },
+  folderCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  folderCardTitleBlock: {
+    flex: 1,
+    gap: 4,
+  },
+  folderCardTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+  },
+  folderSummaryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  folderSummaryPill: {
+    flexGrow: 1,
+    flexBasis: '22%',
+    minWidth: 72,
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingVertical: 9,
+    paddingHorizontal: 10,
+    gap: 2,
+  },
+  folderSummaryValue: {
+    fontSize: 17,
+    fontWeight: '800',
+  },
+  folderSummaryLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  folderCardActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  folderActionButton: {
+    flexGrow: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  folderActionButtonText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  folderEditActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  folderSetList: {
     gap: 10,
   },
   folderGroupTitle: {
